@@ -1,0 +1,12 @@
+**/__pycache__/
+*.pyc
+*.pyo
+
+logs/*
+!logs/.gitkeep
+
+website/media/*
+!website/media/.gitkeep
+
+database/*-backup.sqlite3
+database/*-backup.sql

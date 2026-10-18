@@ -1,0 +1,391 @@
+{
+  "generated_at_utc": "2026-10-18T14:27:18.213467+00:00",
+  "status": "passed",
+  "error": null,
+  "scope": "Part A setup and existing functionality; all mutations on temporary database copy",
+  "checks": [
+    {
+      "check": "SQLite integrity",
+      "passed": true
+    },
+    {
+      "check": "SQLite foreign keys",
+      "passed": true
+    },
+    {
+      "check": "Homepage public",
+      "passed": true
+    },
+    {
+      "check": "Anonymous dashboard redirects",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /accounts/login/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Incorrect password rejected",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /accounts/login/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Login admin",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /accounts/login/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Login faculty1",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /accounts/login/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Login student1",
+      "passed": true
+    },
+    {
+      "check": "admin /dashboard/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /students/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /academics/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /attendance/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /gradebook/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /registration/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /fees/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /documents/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /notifications/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /helpdesk/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /reports/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /audits/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /students/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /academics/courses/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /fees/structures/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /fees/payments/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "admin /gradebook/exams/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /dashboard/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /students/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /academics/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /attendance/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /gradebook/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /registration/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /fees/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /documents/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /notifications/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /helpdesk/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /reports/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /audits/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /students/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /academics/courses/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /fees/structures/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /fees/payments/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "faculty1 (staff demo) /gradebook/exams/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /dashboard/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /students/me/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /attendance/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /gradebook/my-results/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /registration/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /fees/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /documents/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /notifications/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "student1 /helpdesk/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Other student profile denied",
+      "passed": true
+    },
+    {
+      "check": "Student directory denied",
+      "passed": true
+    },
+    {
+      "check": "Student audit admin endpoint denied",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /students/1/edit/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Student own editable profile persisted",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /students/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Admin create student",
+      "passed": true
+    },
+    {
+      "check": "New student login account created",
+      "passed": true
+    },
+    {
+      "check": "New student detail renders",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /students/4/edit/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Admin edit persists",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /students/4/delete/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Admin delete persists",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /gradebook/exams/1/grades/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Faculty demo grade update persists",
+      "passed": true
+    },
+    {
+      "check": "Student results reflect grade update",
+      "passed": true
+    },
+    {
+      "check": "CSRF form available /fees/payments/add/",
+      "passed": true,
+      "status": 200
+    },
+    {
+      "check": "Faculty demo payment persisted",
+      "passed": true
+    },
+    {
+      "check": "CSV student export",
+      "passed": true
+    },
+    {
+      "check": "Seed does not duplicate students",
+      "passed": true
+    },
+    {
+      "check": "Seed preserves existing password hashes",
+      "passed": true
+    },
+    {
+      "check": "Seed preserves user changes",
+      "passed": true
+    },
+    {
+      "check": "Logout clears authenticated session",
+      "passed": true
+    },
+    {
+      "check": "After logout dashboard redirects",
+      "passed": true
+    },
+    {
+      "check": "SQL dump restores three students",
+      "passed": true
+    },
+    {
+      "check": "Restored SQL integrity",
+      "passed": true
+    },
+    {
+      "check": "Restored SQL foreign keys",
+      "passed": true
+    }
+  ],
+  "passed": 82,
+  "total": 82
+}

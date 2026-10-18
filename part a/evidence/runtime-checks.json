@@ -1,0 +1,17 @@
+{
+  "checked_at_utc": "2026-10-18T11:57:35.871457+00:00",
+  "guide_links_valid": true,
+  "runtime": "CPython 3.12.10 Windows x64",
+  "http_homepage": 200,
+  "local_frontend_assets": 200,
+  "django_check": "no issues",
+  "migration_drift": "no changes detected",
+  "launcher_stop_restart": "passed",
+  "browser_roles_verified": [
+    "admin",
+    "faculty1",
+    "student1"
+  ],
+  "browser_console_errors": [],
+  "notes": "All writes during functional/security testing were isolated. Browser verification used the live fictional demonstration database."
+}

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="700" viewBox="0 0 900 700">
+<defs><linearGradient id="sky" x2="0" y2="1"><stop stop-color="#cee8ff"/><stop offset="1" stop-color="#f4faff"/></linearGradient></defs>
+<rect width="900" height="700" fill="url(#sky)"/><circle cx="735" cy="125" r="60" fill="#ffcf73"/>
+<path d="M0 560Q260 430 470 550T900 510V700H0Z" fill="#a8ccb5"/><path d="M360 700L420 530H490L580 700" fill="#f9ecce"/>
+<rect x="165" y="325" width="570" height="235" rx="5" fill="#f5f0e7"/><rect x="325" y="285" width="250" height="275" fill="#fffaf1"/>
+<path d="M120 325L450 150L780 325Z" fill="#184e7e"/><path d="M310 287L450 211L590 287Z" fill="#3274a9"/>
+<circle cx="450" cy="255" r="22" fill="#fff7dd"/><path d="M450 240V255L460 262" fill="none" stroke="#184e7e" stroke-width="5"/>
+<g fill="#85b4d6" stroke="#326890" stroke-width="9"><path d="M215 372H265V425H215Z M215 465H265V518H215Z M635 372H685V425H635Z M635 465H685V518H635Z"/></g>
+<g fill="#e3d5bc"><rect x="350" y="335" width="25" height="225"/><rect x="405" y="335" width="25" height="225"/><rect x="470" y="335" width="25" height="225"/><rect x="525" y="335" width="25" height="225"/></g>
+<path d="M431 560V469Q450 435 469 469V560Z" fill="#184e7e"/><path d="M305 560H595V578H305Z M290 578H610V596H290Z" fill="#c7bca6"/>
+<g fill="#346d61"><circle cx="100" cy="440" r="55"/><circle cx="800" cy="450" r="65"/></g><g stroke="#75624a" stroke-width="14"><path d="M100 460V585 M800 480V590"/></g>
+<text x="450" y="660" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="26" letter-spacing="8" fill="#184e7e">STUDENTHUB CAMPUS</text></svg>

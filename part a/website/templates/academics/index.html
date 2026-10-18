@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-3xl font-extrabold">Academics</h1>
+    <div class="flex gap-2 text-sm">
+      <a href="/academics/departments/add/" class="rounded-lg bg-brand-700 px-3 py-2 font-semibold text-white">Add Department</a>
+      <a href="/academics/programs/add/" class="rounded-lg bg-slate-900 px-3 py-2 font-semibold text-white">Add Program</a>
+      <a href="/academics/courses/add/" class="rounded-lg bg-emerald-700 px-3 py-2 font-semibold text-white">Add Course</a>
+      <a href="/academics/faculty/add/" class="rounded-lg bg-indigo-700 px-3 py-2 font-semibold text-white">Add Faculty</a>
+    </div>
+  </div>
+
+  <div class="grid gap-5 lg:grid-cols-2 xl:grid-cols-4">
+    <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 font-bold">Departments</h2>
+      <div class="space-y-2 text-sm">
+        {% for d in departments %}
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"><span>{{ d.name }} ({{ d.code }})</span><a class="text-brand-700" href="/academics/departments/{{ d.id }}/edit/">Edit</a></div>
+        {% empty %}<p class="text-slate-500">No departments yet.</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 font-bold">Programs</h2>
+      <div class="space-y-2 text-sm">
+        {% for p in programs %}
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"><span>{{ p.name }} - {{ p.department.code }}</span><a class="text-brand-700" href="/academics/programs/{{ p.id }}/edit/">Edit</a></div>
+        {% empty %}<p class="text-slate-500">No programs yet.</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 font-bold">Faculty</h2>
+      <div class="space-y-2 text-sm">
+        {% for f in faculties %}
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"><span>{{ f.employee_id }} - {{ f.full_name }}{% if f.department %} ({{ f.department.code }}){% endif %}</span><a class="text-brand-700" href="/academics/faculty/{{ f.id }}/edit/">Edit</a></div>
+        {% empty %}<p class="text-slate-500">No faculty yet.</p>{% endfor %}
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 class="mb-3 font-bold">Courses</h2>
+      <div class="space-y-2 text-sm">
+        {% for c in courses %}
+          <div class="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2"><span>{{ c.code }} - {{ c.name }}</span><a class="text-brand-700" href="/academics/courses/{{ c.id }}/edit/">Edit</a></div>
+        {% empty %}<p class="text-slate-500">No courses yet.</p>{% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
