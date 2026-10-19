@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "checked_at_utc": "2026-10-18T22:21:51.672481+00:00",
+  "passed": 16,
+  "total": 16,
+  "checks": [
+    {
+      "check": "SQLite schema contains six application tables",
+      "passed": true,
+      "detail": "['absences', 'classes', 'grades', 'risk_thresholds', 'sqlite_sequence', 'student_class', 'users']"
+    },
+    {
+      "check": "Fictional demo students are present",
+      "passed": true,
+      "detail": "3"
+    },
+    {
+      "check": "Demo grades are present",
+      "passed": true,
+      "detail": "6"
+    },
+    {
+      "check": "Demo absences are present",
+      "passed": true,
+      "detail": "6"
+    },
+    {
+      "check": "Login page loads",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "Student registration page loads",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "Admin login redirects to dashboard",
+      "passed": true,
+      "detail": "/admin_dashboard"
+    },
+    {
+      "check": "Admin dashboard loads",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "Analytics dashboard loads",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "Performance API returns JSON",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "CSV export works",
+      "passed": true,
+      "detail": "text/csv; charset=utf-8"
+    },
+    {
+      "check": "Excel export works",
+      "passed": true,
+      "detail": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    },
+    {
+      "check": "PDF export works",
+      "passed": true,
+      "detail": "application/pdf"
+    },
+    {
+      "check": "Student login redirects to dashboard",
+      "passed": true,
+      "detail": "/student_dashboard"
+    },
+    {
+      "check": "Student dashboard loads personal grades",
+      "passed": true,
+      "detail": "200"
+    },
+    {
+      "check": "Logout redirects to login",
+      "passed": true,
+      "detail": "/login"
+    }
+  ]
+}
