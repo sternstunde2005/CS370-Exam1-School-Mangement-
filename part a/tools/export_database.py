@@ -1,23 +1,28 @@
-"""Create a consistent SQLite snapshot and portable SQL dump; does not alter live data."""
 from pathlib import Path
+import shutil
 import sqlite3
-import argparse
-from contextlib import closing
 
-root = Path(__file__).resolve().parent.parent
-parser = argparse.ArgumentParser()
-parser.add_argument('--name', default='studenthub-backup')
-args = parser.parse_args()
-if not args.name.replace('-', '').replace('_', '').isalnum():
-    parser.error('Name may contain letters, numbers, hyphens and underscores only.')
-db_path = root / 'website' / 'db.sqlite3'
-with closing(sqlite3.connect(db_path.as_uri() + '?mode=ro', uri=True)) as source:
-    target_path = root / 'database' / f'{args.name}.sqlite3'
-    sql_path = root / 'database' / f'{args.name}.sql'
-    if target_path.exists() or sql_path.exists():
-        raise SystemExit(f'Refusing to overwrite an existing backup named {args.name}')
-    with closing(sqlite3.connect(target_path)) as target:
-        source.backup(target)
-        sql = '\n'.join(target.iterdump()) + '\n'
-    sql_path.write_text(sql, encoding='utf-8')
-print(target_path)
+
+BUNDLE_ROOT = Path(__file__).resolve().parents[1]
+DATABASE_PATH = BUNDLE_ROOT / "website" / "school.db"
+OUTPUT_DIR = BUNDLE_ROOT / "database"
+
+
+def export_database() -> None:
+    if not DATABASE_PATH.exists():
+        raise SystemExit("website/school.db does not exist. Run seed_demo.py first.")
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    snapshot = OUTPUT_DIR / "school-demo.sqlite3"
+    dump = OUTPUT_DIR / "school-demo.sql"
+    shutil.copy2(DATABASE_PATH, snapshot)
+    connection = sqlite3.connect(DATABASE_PATH)
+    try:
+        dump.write_text("\n".join(connection.iterdump()) + "\n", encoding="utf-8", newline="\n")
+    finally:
+        connection.close()
+    print(f"Database snapshot: {snapshot}")
+    print(f"SQL dump: {dump}")
+
+
+if __name__ == "__main__":
+    export_database()

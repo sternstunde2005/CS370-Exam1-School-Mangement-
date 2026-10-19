@@ -1,14 +1,38 @@
 {
   "status": "passed",
-  "checked_at_utc": "2026-10-18T11:59:22.831938+00:00",
-  "tested_path_contains_spaces_and_non_ascii": true,
-  "windows_x64_portable_runtime": true,
-  "archive_includes_clean_demo_database": true,
-  "checks": {
-    "python_and_dependencies": "3.12.10 6.0.9 12.3.0",
-    "django_check": "System check identified no issues (0 silenced).",
-    "backup_tool": "<relocated-project>\\database\\relocation-backup.sqlite3",
-    "backup_refuses_overwrite": true,
-    "relocated_http_login": 200
-  }
+  "checked_at_utc": "2026-10-18T19:43:39.1565692Z",
+  "source_repository": "https://github.com/zaydkassimi/school-management",
+  "source_commit": "cb6035cebfd40da5a244e2671d3a9631018e25a2",
+  "scope": "Project 3 Part A items 1-3; item 4 deferred",
+  "checks": [
+    {
+      "check": "PowerShell start and stop scripts parse",
+      "passed": true
+    },
+    {
+      "check": "Demo seed is idempotent",
+      "passed": true
+    },
+    {
+      "check": "Portable runtime works after relocation to Desktop",
+      "passed": true
+    },
+    {
+      "check": "Desktop functional verification",
+      "passed": true,
+      "detail": "16/16 checks passed"
+    },
+    {
+      "check": "Desktop one-click start returns HTTP 200",
+      "passed": true
+    },
+    {
+      "check": "Desktop one-click stop closes port 5000",
+      "passed": true
+    },
+    {
+      "check": "Active and recovery databases contain identical demo rows",
+      "passed": true
+    }
+  ]
 }

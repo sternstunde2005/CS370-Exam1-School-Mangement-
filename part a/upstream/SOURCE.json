@@ -1,7 +1,8 @@
 {
-  "repository": "https://github.com/tasmiul/student-management-system-django",
-  "commit": "ecbffaa293753af50d93eb052ac94d87d28d0845",
-  "license": "MIT",
-  "retrieved_on": "2026-10-18",
-  "scope": "Project-3.pdf Part A only"
+  "repository": "https://github.com/zaydkassimi/school-management",
+  "commit": "cb6035cebfd40da5a244e2671d3a9631018e25a2",
+  "commit_date": "2025-09-28T17:10:26+01:00",
+  "retrieved_date": "2026-10-19",
+  "license_status": "No LICENSE, COPYING, or NOTICE file and no GitHub-detected license at the inspected commit.",
+  "archive": "school-management-cb6035c-original.zip"
 }
