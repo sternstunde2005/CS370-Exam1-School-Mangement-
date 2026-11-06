@@ -33,7 +33,7 @@ These six findings exceed the requirement to identify at least three weaknesses 
 
 ## SEC-01 — Public static Flask session signing key
 
-**Severity:** Critical
+**Severity:** Critical<br>
 **Category:** CWE-321, Use of Hard-coded Cryptographic Key
 
 ### Evidence
@@ -58,7 +58,7 @@ Exploitation requires network access to the application and knowledge of the pub
 
 ## SEC-02 — Hard-coded administrator credentials
 
-**Severity:** High
+**Severity:** High<br>
 **Category:** CWE-798, Use of Hard-coded Credentials
 
 ### Evidence
@@ -81,7 +81,7 @@ The risk applies when the application is reachable and this login path is enable
 
 ## SEC-03 — Fast, unsalted SHA-256 password storage
 
-**Severity:** High
+**Severity:** High<br>
 **Category:** CWE-916, Use of Password Hash With Insufficient Computational Effort
 
 ### Evidence
@@ -104,7 +104,7 @@ Offline cracking requires access to password hashes, so this is primarily a defe
 
 ## SEC-04 — Missing CSRF protection on state-changing forms
 
-**Severity:** High
+**Severity:** High<br>
 **Category:** CWE-352, Cross-Site Request Forgery
 
 ### Evidence
@@ -127,7 +127,7 @@ The victim must have a valid session and encounter attacker-controlled content. 
 
 ## SEC-05 — No application-level login throttling or temporary lockout
 
-**Severity:** Medium
+**Severity:** Medium<br>
 **Category:** CWE-307, Improper Restriction of Excessive Authentication Attempts
 
 ### Evidence
@@ -149,7 +149,7 @@ This test proves that the Flask application itself does not throttle requests. A
 
 ## SEC-06 — Missing server-side validation of grades and absences
 
-**Severity:** Medium
+**Severity:** Medium<br>
 **Category:** CWE-20, Improper Input Validation
 
 ### Evidence
