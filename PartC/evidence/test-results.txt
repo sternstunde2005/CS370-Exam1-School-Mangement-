@@ -1,0 +1,42 @@
+test_additive_migration_is_idempotent (test_permissions.PermissionTests.test_additive_migration_is_idempotent) ... ok
+test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) ... ok
+test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) ... ok
+test_authorized_faculty_still_requires_csrf (test_permissions.PermissionTests.test_authorized_faculty_still_requires_csrf) ... ok
+test_authorized_faculty_still_requires_valid_inputs (test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs) ... ok
+test_cookie_role_forgery_does_not_elevate_student (test_permissions.PermissionTests.test_cookie_role_forgery_does_not_elevate_student) ... ok
+test_database_demotion_immediately_revokes_admin_session (test_permissions.PermissionTests.test_database_demotion_immediately_revokes_admin_session) ... ok
+test_database_demotion_immediately_revokes_faculty_session (test_permissions.PermissionTests.test_database_demotion_immediately_revokes_faculty_session) ... ok
+test_deleted_account_loses_existing_session (test_permissions.PermissionTests.test_deleted_account_loses_existing_session) ... ok
+test_denial_audit_contains_endpoint_and_actor (test_permissions.PermissionTests.test_denial_audit_contains_endpoint_and_actor) ... ok
+test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) ... ok
+test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) ... ok
+test_faculty_reads_only_assigned_modules (test_permissions.PermissionTests.test_faculty_reads_only_assigned_modules) ... ok
+test_faculty_writes_assigned_record_and_forces_teacher_identity (test_permissions.PermissionTests.test_faculty_writes_assigned_record_and_forces_teacher_identity) ... ok
+test_form_and_query_role_forgery_does_not_elevate (test_permissions.PermissionTests.test_form_and_query_role_forgery_does_not_elevate) ... ok
+test_local_cli_can_create_faculty_account (test_permissions.PermissionTests.test_local_cli_can_create_faculty_account) ... ok
+test_local_cli_demotion_revokes_active_session_and_assignments (test_permissions.PermissionTests.test_local_cli_demotion_revokes_active_session_and_assignments) ... ok
+test_local_cli_provisions_and_revokes_assignments (test_permissions.PermissionTests.test_local_cli_provisions_and_revokes_assignments) ... ok
+test_local_cli_rejects_student_as_faculty (test_permissions.PermissionTests.test_local_cli_rejects_student_as_faculty) ... ok
+test_login_routes_by_database_role (test_permissions.PermissionTests.test_login_routes_by_database_role) ... ok
+test_logout_invalidates_access_and_get_logout_is_disabled (test_permissions.PermissionTests.test_logout_invalidates_access_and_get_logout_is_disabled) ... ok
+test_missing_student_admin_returns_404 (test_permissions.PermissionTests.test_missing_student_admin_returns_404) ... ok
+test_new_record_for_assigned_module_can_be_created (test_permissions.PermissionTests.test_new_record_for_assigned_module_can_be_created) ... ok
+test_registration_always_creates_student (test_permissions.PermissionTests.test_registration_always_creates_student) ... ok
+test_revoked_assignment_takes_effect_on_existing_session (test_permissions.PermissionTests.test_revoked_assignment_takes_effect_on_existing_session) ... ok
+test_second_faculty_cannot_use_first_faculty_assignment (test_permissions.PermissionTests.test_second_faculty_cannot_use_first_faculty_assignment) ... ok
+test_string_admin_session_and_hardcoded_admin_login_rejected (test_permissions.PermissionTests.test_string_admin_session_and_hardcoded_admin_login_rejected) ... ok
+test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) ... ok
+test_student_horizontal_idor_denied (test_permissions.PermissionTests.test_student_horizontal_idor_denied) ... ok
+test_student_reads_self_without_other_student_data (test_permissions.PermissionTests.test_student_reads_self_without_other_student_data) ... ok
+test_unknown_database_role_fails_closed (test_permissions.PermissionTests.test_unknown_database_role_fails_closed) ... ok
+test_failed_event (test_audit_logger.TestAuditLogger.test_failed_event)
+A failed event should have success = 0. ... ok
+test_successful_event (test_audit_logger.TestAuditLogger.test_successful_event)
+A successful security event should be saved. ... ok
+test_table_creation (test_audit_logger.TestAuditLogger.test_table_creation)
+The audit_logs table should be created. ... ok
+
+----------------------------------------------------------------------
+Ran 34 tests in 3.095s
+
+OK

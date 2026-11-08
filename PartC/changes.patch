@@ -1,0 +1,1337 @@
+--- a/website/app.py
++++ b/website/app.py
+@@ -3,7 +3,10 @@
+ import hashlib
+ import secrets
+ from security_d import install_csrf, validate_academic_record
+-from flask import abort
++from flask import abort, g
++from pathlib import Path
++from security_c import (install_rbac, roles_required, connect_db,
++                        require_assignment, read_records, deny, ROLES)
+ from functools import wraps
+ # import pandas as pd  # Removed due to Python 3.13 compatibility issues
+ import io
+@@ -17,6 +20,8 @@
+ 
+ app = Flask(__name__)
+ app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
++app.config['DATABASE'] = str(Path(__file__).resolve().parent / 'school.db')
++install_rbac(app, log_event)
+ install_csrf(app)
+ 
+ # Database initialization
+@@ -24,9 +29,9 @@
+     print("Initializing database...")
+     
+     # Only create database if it doesn't exist
+-    database_exists = os.path.exists('school.db')
+-    
+-    conn = sqlite3.connect('school.db')
++    database_exists = os.path.exists(app.config['DATABASE'])
++    
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Create users table
+@@ -112,6 +117,16 @@
+         cursor.execute('INSERT INTO risk_thresholds (min_grade, max_absences, risk_level) VALUES (10.0, 10, "medium")')
+         print("Inserted default risk threshold")
+     
++    cursor.execute("""
++        CREATE TABLE IF NOT EXISTS faculty_assignments (
++            faculty_id INTEGER NOT NULL REFERENCES users(id),
++            student_id INTEGER NOT NULL REFERENCES users(id),
++            module_name TEXT NOT NULL,
++            academic_year TEXT NOT NULL,
++            semester TEXT NOT NULL,
++            PRIMARY KEY (faculty_id, student_id, module_name, academic_year, semester)
++        )
++    """)
+     print("Database initialization completed successfully")
+     conn.commit()
+     conn.close()
+@@ -121,32 +136,9 @@
+     else:
+         print("Existing database loaded. Your data is preserved.")
+ 
+-# Login required decorator
+-def login_required(f):
+-    @wraps(f)
+-    def decorated_function(*args, **kwargs):
+-        if 'user_id' not in session:
+-            return redirect(url_for('login'))
+-        return f(*args, **kwargs)
+-    return decorated_function
+-
+-# Admin required decorator
+-def admin_required(f):
+-    @wraps(f)
+-    def decorated_function(*args, **kwargs):
+-        if 'user_id' not in session:
+-            return redirect(url_for('login'))
+-        if session.get('role') != 'admin':
+-            log_event(
+-                user_id=session.get('user_id'),
+-                action='UNAUTHORIZED_ACCESS',
+-                success=False,
+-                details='Attempted to access an admin-only resource'
+-            )
+-            flash('Access denied. Admin privileges required.')
+-            return redirect(url_for('student_dashboard'))
+-        return f(*args, **kwargs)
+-    return decorated_function
++# Part C: role authority comes from the database on every request.
++login_required = roles_required('student', 'faculty', 'admin')
++admin_required = roles_required('admin')
+ 
+ # Hash password
+ def hash_password(password):
+@@ -154,7 +146,7 @@
+ 
+ # Get risk level for a student
+ def get_student_risk_level(student_id):
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get student's average grade
+@@ -185,7 +177,7 @@
+ 
+ # Get student ranking
+ def get_student_ranking(student_id):
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get all students with their average grades
+@@ -210,7 +202,7 @@
+ 
+ # Get student performance evolution over semesters
+ def get_student_evolution(student_id):
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get student's grades across semesters
+@@ -250,27 +242,15 @@
+         email = request.form['email']
+         password = request.form['password']
+         
+-        # Check for admin login
+-        if email == 'admin' and password == 'admin':
+-            session['user_id'] = 'admin'
+-            session['role'] = 'admin'
+-            session['name'] = 'Administrator'
+-            log_event(
+-            user_id='admin',
+-            action='LOGIN',
+-            success=True,
+-            details='Administrator login successful'
+-        )
+-            return redirect(url_for('admin_dashboard'))
+-        
+-        # Check for student login
+-        conn = sqlite3.connect('school.db')
++        # All roles authenticate against users; no special admin password.
++        conn = sqlite3.connect(app.config['DATABASE'])
+         cursor = conn.cursor()
+         cursor.execute('SELECT id, name, password, role FROM users WHERE email = ?', (email,))
+         user = cursor.fetchone()
+         conn.close()
+         
+-        if user and user[2] == hash_password(password):
++        if user and user[2] == hash_password(password) and user[3] in ROLES:
++            session.clear()
+             session['user_id'] = user[0]
+             session['role'] = user[3]
+             session['name'] = user[1]
+@@ -278,9 +258,9 @@
+                 user_id=user[0],
+                 action='LOGIN',
+                 success=True,
+-                details='Student login successful'
++                details=f'{user[3]} login successful'
+             )
+-            return redirect(url_for('student_dashboard'))
++            return redirect(url_for({'student': 'student_dashboard', 'faculty': 'faculty_dashboard', 'admin': 'admin_dashboard'}[user[3]]))
+         else:
+             log_event(
+                 user_id=email,
+@@ -299,7 +279,7 @@
+         email = request.form['email']
+         password = request.form['password']
+         
+-        conn = sqlite3.connect('school.db')
++        conn = sqlite3.connect(app.config['DATABASE'])
+         cursor = conn.cursor()
+         
+         # Check if email already exists
+@@ -336,70 +316,10 @@
+ @admin_required
+ def admin_dashboard():
+     if request.method == 'POST':
+-        try:
+-            values = validate_academic_record(request.form)
+-        except ValueError as error:
+-            abort(400, description=str(error))
+-        student_id, module_name, grade, absences, teacher_name, academic_year, semester = values
+-
+-        conn = sqlite3.connect('school.db')
+-        cursor = conn.cursor()
+-        cursor.execute("SELECT id FROM users WHERE id = ? AND role = 'student'", (student_id,))
+-        if cursor.fetchone() is None:
+-            conn.close()
+-            abort(400, description='Choose an existing student.')
+-
+-        # Update or insert grade
+-        cursor.execute('SELECT id FROM grades WHERE student_id = ? AND module_name = ? AND academic_year = ? AND semester = ?', 
+-                      (student_id, module_name, academic_year, semester))
+-        existing_grade = cursor.fetchone()
+-        
+-        if existing_grade:
+-            cursor.execute('''
+-                UPDATE grades 
+-                SET grade = ?, teacher_name = ? 
+-                WHERE student_id = ? AND module_name = ? AND academic_year = ? AND semester = ?
+-            ''', (grade, teacher_name, student_id, module_name, academic_year, semester))
+-        else:
+-            cursor.execute('''
+-                INSERT INTO grades 
+-                (student_id, module_name, grade, teacher_name, academic_year, semester) 
+-                VALUES (?, ?, ?, ?, ?, ?)
+-            ''', (student_id, module_name, grade, teacher_name, academic_year, semester))
+-        
+-        # Update or insert module-specific absences
+-        cursor.execute('''
+-            SELECT id FROM absences 
+-            WHERE student_id = ? AND module_name = ? AND academic_year = ? AND semester = ?
+-        ''', (student_id, module_name, academic_year, semester))
+-        
+-        existing_absence = cursor.fetchone()
+-        
+-        if existing_absence:
+-            cursor.execute('''
+-                UPDATE absences 
+-                SET count = ? 
+-                WHERE student_id = ? AND module_name = ? AND academic_year = ? AND semester = ?
+-            ''', (absences, student_id, module_name, academic_year, semester))
+-        else:
+-            cursor.execute('''
+-                INSERT INTO absences 
+-                (student_id, module_name, count, academic_year, semester) 
+-                VALUES (?, ?, ?, ?, ?)
+-            ''', (student_id, module_name, absences, academic_year, semester))
+-        
+-        conn.commit()
+-        conn.close()
+-
+-        log_event(
+-            user_id=session.get('user_id'),
+-            action='STUDENT_RECORD_UPDATED',
+-            success=True,
+-            details=f'Student ID {student_id}: grade and attendance data saved'
+-        )
++        save_academic_record()
+         flash('Student data updated successfully!')
+         return redirect(url_for('admin_dashboard'))
+-    
++
+     # Get filter parameters
+     academic_year = request.args.get('academic_year', '2024-2025')
+     module_filter = request.args.get('module', '')
+@@ -408,7 +328,7 @@
+     semester_filter = request.args.get('semester', '')
+     
+     # Get all students with their grades and absences
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Build query with filters
+@@ -526,12 +446,9 @@
+                          })
+ 
+ @app.route('/student_dashboard')
+-@login_required
+-def student_dashboard():
+-    if session.get('role') == 'admin':
+-        return redirect(url_for('admin_dashboard'))
+-    
+-    conn = sqlite3.connect('school.db')
++@roles_required('student')
++def student_dashboard():    
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get student's grades with absences for each module
+@@ -584,7 +501,7 @@
+ @app.route('/analytics')
+ @admin_required
+ def analytics():
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get overall statistics
+@@ -657,7 +574,7 @@
+ def export_data():
+     format_type = request.args.get('format', 'csv')
+     
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     
+     if format_type == 'excel':
+         # Create Excel file with simplified pandas approach
+@@ -1025,8 +942,13 @@
+         )
+ 
+ @app.route('/api/student_risk/<int:student_id>')
+-@admin_required
++@roles_required('student', 'admin')
+ def api_student_risk(student_id):
++    if g.user['role'] == 'student' and student_id != g.user['id']:
++        deny(403, 'Students may only read their own risk assessment.')
++    with connect_db() as conn:
++        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
++            abort(404)
+     risk_level = get_student_risk_level(student_id)
+     ranking, total_students, avg_grade = get_student_ranking(student_id)
+     evolution_data = get_student_evolution(student_id)
+@@ -1042,7 +964,7 @@
+ @app.route('/api/performance_evolution')
+ @admin_required
+ def api_performance_evolution():
+-    conn = sqlite3.connect('school.db')
++    conn = sqlite3.connect(app.config['DATABASE'])
+     cursor = conn.cursor()
+     
+     # Get performance evolution by semester
+@@ -1075,7 +997,63 @@
+     session.clear()
+     return redirect(url_for('login'))
+ 
++def save_academic_record():
++    try:
++        student_id, module, grade, absences, teacher, year, semester = validate_academic_record(request.form)
++    except ValueError as error:
++        abort(400, description=str(error))
++    with connect_db() as conn:
++        # Lock before checking assignments so revocation cannot race this write.
++        conn.execute('BEGIN IMMEDIATE')
++        require_assignment(conn, student_id, module, year, semester)
++        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
++            abort(400, description='Choose an existing student.')
++        if g.user['role'] == 'faculty':
++            teacher = g.user['name']
++        key = (student_id, module, year, semester)
++        exists = conn.execute('''SELECT 1 FROM grades WHERE student_id = ?
++            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
++        if exists:
++            conn.execute('''UPDATE grades SET grade = ?, teacher_name = ? WHERE student_id = ?
++                AND module_name = ? AND academic_year = ? AND semester = ?''', (grade, teacher, *key))
++        else:
++            conn.execute('''INSERT INTO grades (grade, teacher_name, student_id, module_name,
++                academic_year, semester) VALUES (?, ?, ?, ?, ?, ?)''', (grade, teacher, *key))
++        exists = conn.execute('''SELECT 1 FROM absences WHERE student_id = ?
++            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
++        if exists:
++            conn.execute('''UPDATE absences SET count = ? WHERE student_id = ? AND module_name = ?
++                AND academic_year = ? AND semester = ?''', (absences, *key))
++        else:
++            conn.execute('''INSERT INTO absences (count, student_id, module_name, academic_year,
++                semester) VALUES (?, ?, ?, ?, ?)''', (absences, *key))
++    log_event(g.user['id'], 'STUDENT_RECORD_UPDATED', True,
++              f'Student {student_id}; {module}; {year}; S{semester}')
++
++
++@app.route('/faculty_dashboard', methods=['GET', 'POST'])
++@roles_required('faculty')
++def faculty_dashboard():
++    if request.method == 'POST':
++        save_academic_record()
++        flash('Assigned record updated successfully.')
++        return redirect(url_for('faculty_dashboard'))
++    with connect_db() as conn:
++        assignments = conn.execute('''SELECT f.student_id, u.name, f.module_name,
++            f.academic_year, f.semester FROM faculty_assignments f
++            JOIN users u ON u.id = f.student_id AND u.role = 'student'
++            WHERE f.faculty_id = ? ORDER BY u.name, f.module_name''', (g.user['id'],)).fetchall()
++    records = {sid: read_records(sid) for sid in {row[0] for row in assignments}}
++    return render_template('faculty_dashboard.html', assignments=assignments, records=records)
++
++
++@app.route('/api/student_records/<int:student_id>')
++@roles_required('student', 'faculty', 'admin')
++def api_student_records(student_id):
++    return jsonify(student_id=student_id, records=read_records(student_id))
++
++
+ if __name__ == '__main__':
+     init_db()
+-    app.run(debug=True)
+-
++    app.run(host='127.0.0.1', debug=False)
++
+--- a/website/audit_logger.py
++++ b/website/audit_logger.py
+@@ -1,5 +1,6 @@
+ 
+ import sqlite3
++from contextlib import closing
+ from datetime import datetime, timezone
+ 
+ from pathlib import Path
+@@ -7,9 +8,14 @@
+ DB_PATH = str(Path(__file__).resolve().parent / "school.db")
+ 
+ 
++def database_path():
++    from flask import current_app, has_app_context
++    return current_app.config.get('DATABASE', DB_PATH) if has_app_context() else DB_PATH
++
++
+ def init_audit_table():
+     """Create the audit log table if it does not exist."""
+-    with sqlite3.connect(DB_PATH) as conn:
++    with closing(sqlite3.connect(database_path())) as conn, conn:
+         conn.execute("""
+             CREATE TABLE IF NOT EXISTS audit_logs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+@@ -28,7 +34,7 @@
+ 
+     timestamp = datetime.now(timezone.utc).isoformat()
+ 
+-    with sqlite3.connect(DB_PATH) as conn:
++    with closing(sqlite3.connect(database_path())) as conn, conn:
+         conn.execute("""
+             INSERT INTO audit_logs
+             (timestamp, user_id, action, success, details)
+--- /dev/null
++++ b/website/manage_access.py
+@@ -0,0 +1,71 @@
++"""Trusted local CLI for staff provisioning; never exposed as a public web route."""
++import argparse
++from getpass import getpass
++from pathlib import Path
++
++from app import app, hash_password, init_db
++from security_c import connect_db
++
++
++def main(argv=None):
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--database', default=app.config['DATABASE'])
++    commands = parser.add_subparsers(dest='command', required=True)
++    create = commands.add_parser('create-user')
++    create.add_argument('--name', required=True)
++    create.add_argument('--email', required=True)
++    create.add_argument('--role', choices=['student', 'faculty', 'admin'], required=True)
++    role = commands.add_parser('set-role')
++    role.add_argument('--user-id', required=True, type=int)
++    role.add_argument('--role', choices=['student', 'faculty', 'admin'], required=True)
++    for command in ('assign', 'revoke'):
++        sub = commands.add_parser(command)
++        sub.add_argument('--faculty-id', type=int, required=True)
++        sub.add_argument('--student-id', type=int, required=True)
++        sub.add_argument('--module', required=True)
++        sub.add_argument('--year', required=True)
++        sub.add_argument('--semester', choices=['1', '2'], required=True)
++    args = parser.parse_args(argv)
++    path = Path(args.database).resolve()
++    if args.command != 'create-user' and not path.is_file():
++        parser.error('Database does not exist.')
++    app.config['DATABASE'] = str(path)
++    password = None
++    if args.command == 'create-user':
++        password = getpass('New password: ')
++        if not password or password != getpass('Confirm password: '):
++            parser.error('Passwords must be nonempty and match.')
++    init_db()
++    with app.app_context(), connect_db() as conn:
++        if args.command == 'create-user':
++            conn.execute('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
++                         (args.name, args.email, hash_password(password), args.role))
++        elif args.command == 'set-role':
++            if conn.execute('UPDATE users SET role = ? WHERE id = ?',
++                            (args.role, args.user_id)).rowcount != 1:
++                parser.error('User does not exist.')
++            # Invalidate old assignments when moving into or out of an academic role.
++            conn.execute('DELETE FROM faculty_assignments WHERE faculty_id = ? OR student_id = ?',
++                         (args.user_id, args.user_id))
++        else:
++            from security_d import validate_academic_record
++            try:
++                values = validate_academic_record(dict(student_id=str(args.student_id),
++                    module_name=args.module, academic_year=args.year, semester=args.semester,
++                    grade='0', absences='0'))
++            except ValueError as error:
++                parser.error(str(error))
++            key = (args.faculty_id, args.student_id, values[1], args.year, args.semester)
++            if args.command == 'assign':
++                for uid, expected in [(args.faculty_id, 'faculty'), (args.student_id, 'student')]:
++                    if not conn.execute('SELECT 1 FROM users WHERE id = ? AND role = ?', (uid, expected)).fetchone():
++                        parser.error(f'Account {uid} must have role {expected}.')
++                conn.execute('INSERT OR IGNORE INTO faculty_assignments VALUES (?, ?, ?, ?, ?)', key)
++            else:
++                conn.execute('''DELETE FROM faculty_assignments WHERE faculty_id = ? AND student_id = ?
++                    AND module_name = ? AND academic_year = ? AND semester = ?''', key)
++    print(f'{args.command} completed.')
++
++
++if __name__ == '__main__':
++    main()
+--- a/website/README.md
++++ b/website/README.md
+@@ -1,144 +1,3 @@
+-# School Management System
++# Part C application
+ 
+-A Flask-based web application for managing student grades and absences with role-based access control.
+-
+-## Features
+-
+-### Authentication System
+-- **Admin Login**: Hardcoded credentials (email: "admin", password: "admin")
+-- **Student Registration**: Students can create new accounts
+-- **Student Login**: Registered students can login with their credentials
+-- **Session Management**: Flask sessions for secure authentication
+-
+-### Admin Dashboard
+-- View all students with their grades and absences
+-- Add/update student grades for different modules
+-- Update student absence counts
+-- Automatic status calculation (Admis/Non Admis based on grade ≥ 10)
+-- **Advanced filtering** by academic year, module, teacher, and risk level
+-- **Risk detection** with configurable thresholds
+-- **Teacher and academic year tracking**
+-- **Export functionality** (CSV/Excel)
+-
+-### Student Dashboard
+-- View personal grades and absence count
+-- See overall academic status
+-- Calculate average grade and modules passed
+-- **Class ranking** and position
+-- **Risk level assessment**
+-- **Performance tracking**
+-- Clean, responsive interface
+-
+-## Database Schema
+-
+-### Tables
+-1. **users** (id, name, email, password, role)
+-2. **grades** (id, student_id, module_name, grade, teacher_name, academic_year)
+-3. **absences** (id, student_id, count, total_hours)
+-4. **classes** (id, name, academic_year, teacher_name)
+-5. **student_class** (id, student_id, class_id)
+-6. **risk_thresholds** (id, min_grade, max_absences, risk_level)
+-
+-## Installation & Setup
+-
+-1. **Clone or download the project files**
+-
+-2. **Install dependencies**:
+-   ```bash
+-   pip install -r requirements.txt
+-   ```
+-
+-3. **Run the application**:
+-   ```bash
+-   python app.py
+-   ```
+-
+-4. **Access the application**:
+-   - Open your browser and go to `http://localhost:5000`
+-   - The application will automatically create the SQLite database on first run
+-
+-## Usage
+-
+-### Admin Access
+-- Login with email: `admin` and password: `admin`
+-- Access the admin dashboard to manage all student data
+-- Add grades for different modules
+-- Update absence counts
+-
+-### Student Access
+-- Register a new account on the registration page
+-- Login with your email and password
+-- View your personal academic performance
+-
+-## Routes
+-
+-- `/` - Redirects to login page
+-- `/login` - Login page (GET/POST)
+-- `/register` - Student registration (GET/POST)
+-- `/admin_dashboard` - Admin dashboard (GET/POST)
+-- `/student_dashboard` - Student dashboard (GET)
+-- `/analytics` - Analytics dashboard (GET)
+-- `/export_data` - Export data (CSV/Excel)
+-- `/api/student_risk/<id>` - Student risk API
+-- `/logout` - Logout and clear session
+-
+-## Technical Details
+-
+-- **Backend**: Python Flask
+-- **Database**: SQLite
+-- **Frontend**: Pure HTML, CSS, JavaScript (no frameworks)
+-- **Authentication**: Flask sessions with password hashing
+-- **Styling**: Custom CSS with responsive design
+-- **Data Export**: CSV and Excel (pandas, openpyxl)
+-- **Risk Analysis**: Configurable thresholds and algorithms
+-
+-## Security Features
+-
+-- Password hashing using SHA-256
+-- Session-based authentication
+-- Role-based access control
+-- SQL injection prevention with parameterized queries
+-
+-## File Structure
+-
+-```
+-├── app.py                 # Main Flask application
+-├── requirements.txt       # Python dependencies
+-├── README.md             # This file
+-├── templates/            # HTML templates
+-│   ├── base.html         # Base template with common styling
+-│   ├── login.html        # Login page
+-│   ├── register.html     # Registration page
+-│   ├── admin_dashboard.html  # Admin dashboard
+-│   └── student_dashboard.html # Student dashboard
+-└── school.db             # SQLite database (created automatically)
+-```
+-
+-## Advanced Features
+-
+-### Analytics Dashboard
+-- **Global performance overview** with key metrics
+-- **Module performance analysis** with success rates
+-- **Student risk detection** with recommendations
+-- **Configurable risk thresholds** (grades and absences)
+-- **Real-time statistics** and trends
+-
+-### Risk Management
+-- **Automatic risk assessment** based on grades and attendance
+-- **Three risk levels**: Low, Medium, High
+-- **Personalized recommendations** for each risk level
+-- **Early warning system** for at-risk students
+-
+-### Data Export & Reporting
+-- **CSV export** for data analysis
+-- **Excel export** with formatted reports
+-- **Comprehensive student data** including grades, absences, and risk levels
+-- **Teacher and academic year tracking**
+-
+-## Notes
+-
+-- The application uses a simple grading system where grades ≥ 10 are considered "Admis" (Passed)
+-- All styling is custom CSS without external frameworks
+-- The database is automatically initialized when the app starts
+-- Admin credentials are hardcoded for simplicity
+-- Risk thresholds can be configured in the database 
++See [the Part C guide](../README.md) for setup, role rules, accounts, tests and integration.
+--- a/website/run.py
++++ b/website/run.py
+@@ -1,30 +1,5 @@
+-import os
+ from app import app, init_db
+ 
+-print("\nStarting School Management System...")
+-print("================================================")
+-
+-try:
+-    print("✓ Flask application loaded successfully")
+-    
+-    # Check if database exists and initialize if needed
+-    db_path = 'school.db'
+-    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+-        print("✓ Creating new database...")
+-        init_db()
+-        print("✓ Database initialized successfully")
+-    else:
+-        print("✓ Database will be initialized automatically")
+-    
+-    print("\nStarting server...")
+-    print("Access the application at: http://localhost:5000")
+-    print("Admin login: email='admin', password='admin'")
+-    print("\nPress Ctrl+C to stop the server")
+-    print("================================================")
+-    
+-    # Run the application
+-    app.run(debug=True, host='0.0.0.0')
+-    
+-except Exception as e:
+-    print(f"✗ Error: {str(e)}")
+-    print("Please check your configuration and try again.")
++if __name__ == '__main__':
++    init_db()
++    app.run(host='127.0.0.1', port=5000, debug=False)
+--- /dev/null
++++ b/website/security_c.py
+@@ -0,0 +1,132 @@
++"""Database-backed roles and explicit academic-record assignments (Part C)."""
++from functools import wraps
++from contextlib import contextmanager
++import sqlite3
++
++from flask import abort, current_app, g, jsonify, request, session
++
++ROLES = frozenset({'student', 'faculty', 'admin'})
++
++
++@contextmanager
++def connect_db():
++    conn = sqlite3.connect(current_app.config['DATABASE'])
++    conn.execute('PRAGMA foreign_keys = ON')
++    try:
++        with conn:
++            yield conn
++    finally:
++        conn.close()
++
++
++def deny(status, reason):
++    # Log after an active academic transaction has rolled back.
++    g.access_denial = (session.get('user_id'), f'{request.method} {request.path}: {reason}')
++    abort(status, description=reason)
++
++
++def install_rbac(app, audit):
++    app.extensions['audit_c'] = audit
++
++    @app.before_request
++    def load_identity():
++        g.user = None
++        user_id = session.get('user_id')
++        if user_id is None:
++            return
++        # The cookie's role/name is display state, never an authority.
++        if type(user_id) is not int or user_id < 1:
++            session.clear()
++            return
++        with connect_db() as conn:
++            row = conn.execute('SELECT id, name, role FROM users WHERE id = ?',
++                               (user_id,)).fetchone()
++        if row is None:
++            session.clear()
++            return
++        g.user = {'id': row[0], 'name': row[1], 'role': row[2]}
++        session['role'], session['name'] = row[2], row[1]
++
++    # Run role checks before Part D's CSRF check; forbidden writes are still 403.
++    @app.before_request
++    def enforce_view_roles():
++        view = app.view_functions.get(request.endpoint)
++        roles = getattr(view, 'allowed_roles', None)
++        if roles is not None:
++            require_roles(roles)
++
++    @app.errorhandler(401)
++    @app.errorhandler(403)
++    def access_error(error):
++        denied = getattr(g, 'access_denial', None)
++        if denied:
++            app.extensions['audit_c'](user_id=denied[0], action='UNAUTHORIZED_ACCESS',
++                                      success=False, details=denied[1])
++        if request.path.startswith('/api/'):
++            return jsonify(error=error.name, message=error.description), error.code
++        return error.get_response()
++
++
++def require_roles(roles):
++    if g.user is None:
++        deny(401, 'Sign in with an existing account.')
++    if g.user['role'] not in ROLES or g.user['role'] not in roles:
++        deny(403, 'Your role cannot access this resource.')
++
++
++def roles_required(*roles):
++    if not roles or not set(roles) <= ROLES:
++        raise ValueError('Explicit supported roles are required.')
++    def decorate(view):
++        @wraps(view)
++        def protected(*args, **kwargs):
++            require_roles(roles)
++            return view(*args, **kwargs)
++        protected.allowed_roles = frozenset(roles)
++        return protected
++    return decorate
++
++
++def require_assignment(conn, student_id, module, year, semester):
++    """Must be called inside the transaction that writes the record."""
++    if g.user['role'] == 'admin':
++        return
++    row = conn.execute('''SELECT 1 FROM faculty_assignments
++        WHERE faculty_id = ? AND student_id = ? AND module_name = ?
++          AND academic_year = ? AND semester = ?''',
++        (g.user['id'], student_id, module, year, semester)).fetchone()
++    if row is None:
++        deny(403, 'This academic record is outside your teaching assignment.')
++
++
++def read_records(student_id):
++    if g.user['role'] == 'student' and student_id != g.user['id']:
++        deny(403, 'Students may only read their own records.')
++    with connect_db() as conn:
++        if g.user['role'] == 'faculty':
++            assigned = conn.execute('''SELECT 1 FROM faculty_assignments
++                WHERE faculty_id = ? AND student_id = ?''',
++                (g.user['id'], student_id)).fetchone()
++            if assigned is None:
++                deny(403, 'This student is outside your teaching assignment.')
++        exists = conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'",
++                              (student_id,)).fetchone()
++        if exists is None:
++            abort(404)
++        query = '''SELECT g.module_name, g.grade, g.teacher_name, g.academic_year,
++                          g.semester, COALESCE(a.count, 0)
++            FROM grades g LEFT JOIN absences a ON a.student_id = g.student_id
++                AND a.module_name = g.module_name AND a.academic_year = g.academic_year
++                AND a.semester = g.semester
++            WHERE g.student_id = ?'''
++        params = [student_id]
++        if g.user['role'] == 'faculty':
++            query += ''' AND EXISTS (SELECT 1 FROM faculty_assignments f
++                WHERE f.faculty_id = ? AND f.student_id = g.student_id
++                  AND f.module_name = g.module_name AND f.academic_year = g.academic_year
++                  AND f.semester = g.semester)'''
++            params.append(g.user['id'])
++        rows = conn.execute(query + ' ORDER BY g.academic_year, g.semester, g.module_name',
++                            params).fetchall()
++    keys = ('module', 'grade', 'teacher', 'academic_year', 'semester', 'absences')
++    return [dict(zip(keys, row)) for row in rows]
+--- /dev/null
++++ b/website/setup_demo.py
+@@ -0,0 +1,38 @@
++"""Explicit local-only provisioning. Refuses to seed an existing database."""
++import argparse
++from pathlib import Path
++import sqlite3
++
++from app import app, hash_password, init_db
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--database', default=str(Path(__file__).parent / 'school.db'))
++    args = parser.parse_args()
++    path = Path(args.database).resolve()
++    if path.exists():
++        parser.error('Database already exists; use a new path to avoid changing existing accounts.')
++    app.config['DATABASE'] = str(path)
++    init_db()
++    with sqlite3.connect(path) as conn:
++        for uid, name, role in [(1, 'Demo Admin', 'admin'), (2, 'Faculty One', 'faculty'),
++                                (3, 'Student One', 'student'), (4, 'Student Two', 'student'),
++                                (5, 'Faculty Two', 'faculty')]:
++            conn.execute('INSERT INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)',
++                         (uid, name, f'{role}{uid}@example.test', hash_password('DemoPass123!'), role))
++        conn.executemany('INSERT INTO faculty_assignments VALUES (?, ?, ?, ?, ?)',
++                         [(2, 3, 'Mathematics', '2024-2025', '1'), (5, 4, 'Physics', '2024-2025', '1')])
++        conn.executemany('''INSERT INTO grades (student_id, module_name, grade, teacher_name,
++            academic_year, semester) VALUES (?, ?, ?, ?, ?, ?)''',
++            [(3, 'Mathematics', 15, 'Faculty One', '2024-2025', '1'),
++             (3, 'Private History', 11, 'Other Teacher', '2024-2025', '1'),
++             (4, 'Physics', 17, 'Faculty Two', '2024-2025', '1')])
++    print(f'Demo database: {path}')
++    print('Password for demo accounts: DemoPass123!')
++    print('admin1@example.test / faculty2@example.test / student3@example.test')
++    print('student4@example.test / faculty5@example.test')
++
++
++if __name__ == '__main__':
++    main()
+--- a/website/templates/base.html
++++ b/website/templates/base.html
+@@ -242,6 +242,8 @@
+                 {% if session.role == 'admin' %}
+                     <a href="{{ url_for('admin_dashboard') }}">Admin Dashboard</a>
+                     <a href="{{ url_for('analytics') }}">Analytics</a>
++                {% elif session.role == 'faculty' %}
++                    <a href="{{ url_for('faculty_dashboard') }}">Faculty Dashboard</a>
+                 {% else %}
+                     <a href="{{ url_for('student_dashboard') }}">My Dashboard</a>
+                 {% endif %}
+--- /dev/null
++++ b/website/templates/faculty_dashboard.html
+@@ -0,0 +1,30 @@
++{% extends "base.html" %}
++{% block title %}Faculty Dashboard{% endblock %}
++{% block content %}
++<h1>Faculty Dashboard</h1>
++<p>Manage grades and absences for your assigned teaching records.</p>
++{% for sid, name, module, year, semester in assignments %}
++<div class="card mt-2">
++  <div class="card-header">{{ name }} · {{ module }} · {{ year }} S{{ semester }}</div>
++  {% for record in records[sid] %}
++    {% if record.module == module and record.academic_year == year and record.semester == semester %}
++    <p>Current grade: {{ record.grade }}/20 · Absences: {{ record.absences }}</p>
++    {% endif %}
++  {% endfor %}
++  <form method="post" action="{{ url_for('faculty_dashboard') }}">
++    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
++    <input type="hidden" name="student_id" value="{{ sid }}">
++    <input type="hidden" name="module_name" value="{{ module }}">
++    <input type="hidden" name="academic_year" value="{{ year }}">
++    <input type="hidden" name="semester" value="{{ semester }}">
++    <div class="grid">
++      <div class="form-group"><label>Grade (0–20)<input type="number" name="grade" min="0" max="20" step="0.01" required></label></div>
++      <div class="form-group"><label>Absences<input type="number" name="absences" min="0" required></label></div>
++    </div>
++    <button class="btn" type="submit">Save assigned record</button>
++  </form>
++</div>
++{% else %}
++<p>No teaching assignments yet. Contact the administrator.</p>
++{% endfor %}
++{% endblock %}
+--- a/website/test_app.py
++++ /dev/null
+@@ -1,72 +0,0 @@
+-#!/usr/bin/env python3
+-"""
+-Simple test script to verify the Flask application setup
+-"""
+-
+-import sqlite3
+-import os
+-
+-def test_database_creation():
+-    """Test if the database and tables are created correctly"""
+-    print("Testing database creation...")
+-    
+-    # Check if database file exists
+-    if os.path.exists('school.db'):
+-        print("✓ Database file created successfully")
+-    else:
+-        print("✗ Database file not found")
+-        return False
+-    
+-    # Test database connection and table structure
+-    try:
+-        conn = sqlite3.connect('school.db')
+-        cursor = conn.cursor()
+-        
+-        # Check if tables exist
+-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+-        tables = [table[0] for table in cursor.fetchall()]
+-        
+-        expected_tables = ['users', 'grades', 'absences']
+-        for table in expected_tables:
+-            if table in tables:
+-                print(f"✓ Table '{table}' created successfully")
+-            else:
+-                print(f"✗ Table '{table}' not found")
+-                return False
+-        
+-        conn.close()
+-        print("✓ Database structure is correct")
+-        return True
+-        
+-    except Exception as e:
+-        print(f"✗ Database test failed: {e}")
+-        return False
+-
+-def test_flask_import():
+-    """Test if Flask can be imported"""
+-    print("\nTesting Flask import...")
+-    try:
+-        from flask import Flask
+-        print("✓ Flask imported successfully")
+-        return True
+-    except ImportError as e:
+-        print(f"✗ Flask import failed: {e}")
+-        return False
+-
+-if __name__ == "__main__":
+-    print("Flask School Management System - Setup Test")
+-    print("=" * 50)
+-    
+-    # Test Flask import
+-    flask_ok = test_flask_import()
+-    
+-    # Test database (will be created when app runs)
+-    print("\nNote: Database will be created when you run 'python app.py'")
+-    
+-    if flask_ok:
+-        print("\n✓ All tests passed! You can now run:")
+-        print("  python app.py")
+-        print("\nThen visit http://localhost:5000 in your browser")
+-        print("\nAdmin login: email='admin', password='admin'")
+-    else:
+-        print("\n✗ Some tests failed. Please check the requirements.") 
+--- a/website/test_audit_logger.py
++++ b/website/test_audit_logger.py
+@@ -1,5 +1,6 @@
+ 
+ import unittest
++from contextlib import closing
+ import sqlite3
+ import tempfile
+ from pathlib import Path
+@@ -31,7 +32,7 @@
+         """The audit_logs table should be created."""
+         audit_logger.init_audit_table()
+ 
+-        with sqlite3.connect(self.db_path) as conn:
++        with closing(sqlite3.connect(self.db_path)) as conn:
+             result = conn.execute("""
+                 SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name = 'audit_logs'
+@@ -48,7 +49,7 @@
+             "Administrator login successful"
+         )
+ 
+-        with sqlite3.connect(self.db_path) as conn:
++        with closing(sqlite3.connect(self.db_path)) as conn:
+             result = conn.execute("""
+                 SELECT user_id, action, success, details
+                 FROM audit_logs
+@@ -73,7 +74,7 @@
+             "Admin page access denied"
+         )
+ 
+-        with sqlite3.connect(self.db_path) as conn:
++        with closing(sqlite3.connect(self.db_path)) as conn:
+             result = conn.execute("""
+                 SELECT user_id, action, success
+                 FROM audit_logs
+--- /dev/null
++++ b/website/test_permissions.py
+@@ -0,0 +1,335 @@
++"""Part C integration tests: real login, signed sessions, real SQLite, CSRF enabled."""
++from contextlib import redirect_stdout, redirect_stderr
++import io
++from pathlib import Path
++import sqlite3
++import tempfile
++import unittest
++
++from app import app, hash_password, init_db
++
++
++class PermissionTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.old_config = dict(app.config)
++        self.addCleanup(self.restore_config)
++        app.config.update(TESTING=True, SECRET_KEY='test-only-secret',
++                          DATABASE=str(Path(self.temp.name) / 'school.db'))
++        with redirect_stdout(io.StringIO()):
++            init_db()
++        with self.db() as conn:
++            for uid, role in [(1, 'admin'), (2, 'faculty'), (3, 'student'), (4, 'student'),
++                              (5, 'faculty'), (6, 'unknown')]:
++                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?)',
++                             (uid, f'User {uid}', f'user{uid}@example.test', hash_password('password'), role))
++            conn.executemany('INSERT INTO faculty_assignments VALUES (?, ?, ?, ?, ?)',
++                             [(2, 3, 'Math', '2024-2025', '1'), (5, 4, 'Physics', '2024-2025', '1')])
++            conn.executemany('''INSERT INTO grades (student_id, module_name, grade, teacher_name,
++                academic_year, semester) VALUES (?, ?, 12, 'Original', '2024-2025', '1')''',
++                             [(3, 'Math'), (3, 'Private History'), (4, 'Physics')])
++            conn.execute('''INSERT INTO absences (student_id, module_name, count, academic_year,
++                semester) VALUES (3, 'Math', 2, '2024-2025', '1')''')
++        self.client = app.test_client()
++
++    def restore_config(self):
++        app.config.clear()
++        app.config.update(self.old_config)
++
++    def db(self):
++        # closing plus transaction avoids leaving Windows SQLite file handles open.
++        from contextlib import contextmanager, closing
++        @contextmanager
++        def connection():
++            with closing(sqlite3.connect(app.config['DATABASE'])) as conn, conn:
++                yield conn
++        return connection()
++
++    def login(self, uid):
++        self.client.get('/login')
++        response = self.post('/login', email=f'user{uid}@example.test', password='password')
++        self.assertEqual(response.status_code, 302)
++        # Login rotates the session. The destination form issues a fresh CSRF token.
++        self.assertEqual(self.client.get(response.location).status_code, 200)
++        return response
++
++    def post(self, path, **data):
++        with self.client.session_transaction() as sess:
++            token = sess.get('_csrf_token')
++        return self.client.post(path, data={'csrf_token': token, **data})
++
++    def record(self, **overrides):
++        return dict(student_id='3', module_name='Math', grade='18.5', absences='1',
++                    teacher_name='Spoofed teacher', academic_year='2024-2025', semester='1', **overrides)
++
++    def snapshot(self):
++        with self.db() as conn:
++            return {table: conn.execute(f'SELECT * FROM {table} ORDER BY 1').fetchall()
++                    for table in ('users', 'grades', 'absences', 'faculty_assignments')}
++
++    def reject(self, response, before, status=403):
++        self.assertEqual(response.status_code, status)
++        self.assertEqual(self.snapshot(), before)
++
++    def reject_unchanged(self, request, status=403):
++        before = self.snapshot()
++        self.reject(request(), before, status)
++
++    def test_local_cli_provisions_and_revokes_assignments(self):
++        from manage_access import main
++        args = ['--database', app.config['DATABASE']]
++        assignment = ['--faculty-id', '2', '--student-id', '4', '--module', 'Physics',
++                      '--year', '2024-2025', '--semester', '1']
++        with redirect_stdout(io.StringIO()):
++            main(args + ['assign'] + assignment)
++        self.login(2)
++        self.assertEqual(self.client.get('/api/student_records/4').status_code, 200)
++        with redirect_stdout(io.StringIO()):
++            main(args + ['revoke'] + assignment)
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
++
++    def test_local_cli_rejects_student_as_faculty(self):
++        from manage_access import main
++        before = self.snapshot()
++        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
++            main(['--database', app.config['DATABASE'], 'assign', '--faculty-id', '3',
++                  '--student-id', '4', '--module', 'Physics', '--year', '2024-2025', '--semester', '1'])
++        self.assertEqual(self.snapshot(), before)
++
++    def test_local_cli_can_create_faculty_account(self):
++        from manage_access import main
++        from unittest.mock import patch
++        with patch('manage_access.getpass', return_value='new-password'), redirect_stdout(io.StringIO()):
++            main(['--database', app.config['DATABASE'], 'create-user', '--name', 'New Faculty',
++                  '--email', 'newfaculty@example.test', '--role', 'faculty'])
++        with self.db() as conn:
++            row = conn.execute("SELECT password, role FROM users WHERE email='newfaculty@example.test'").fetchone()
++        self.assertEqual(row, (hash_password('new-password'), 'faculty'))
++
++    def test_local_cli_demotion_revokes_active_session_and_assignments(self):
++        from manage_access import main
++        self.login(2)
++        with redirect_stdout(io.StringIO()):
++            main(['--database', app.config['DATABASE'], 'set-role', '--user-id', '2', '--role', 'student'])
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++        with self.db() as conn:
++            self.assertEqual(conn.execute('SELECT COUNT(*) FROM faculty_assignments WHERE faculty_id=2').fetchone(), (0,))
++
++    def test_login_routes_by_database_role(self):
++        for uid, target in [(1, '/admin_dashboard'), (2, '/faculty_dashboard'), (3, '/student_dashboard')]:
++            with self.subTest(uid=uid):
++                self.client = app.test_client()
++                self.assertEqual(self.login(uid).location, target)
++                self.assertEqual(self.client.get(target).status_code, 200)
++
++    def test_anonymous_all_protected_resources(self):
++        for path in ['/admin_dashboard', '/faculty_dashboard', '/student_dashboard', '/analytics',
++                     '/export_data', '/api/student_risk/3', '/api/student_records/3', '/api/performance_evolution']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path), 401)
++        for path in ['/admin_dashboard', '/faculty_dashboard']:
++            with self.subTest(post=path):
++                self.reject_unchanged(lambda: self.client.post(path, data=self.record()), 401)
++
++    def test_student_cannot_access_staff_endpoints(self):
++        self.login(3)
++        for path in ['/admin_dashboard', '/faculty_dashboard', '/analytics', '/api/performance_evolution',
++                     '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path))
++        for path in ['/admin_dashboard', '/faculty_dashboard']:
++            with self.subTest(post=path):
++                self.reject_unchanged(lambda: self.post(path, **self.record()))
++
++    def test_faculty_cannot_access_admin_endpoints(self):
++        self.login(2)
++        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution',
++                     '/api/student_risk/3', '/student_dashboard', '/export_data?format=csv',
++                     '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path))
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_student_reads_self_without_other_student_data(self):
++        self.login(3)
++        response = self.client.get('/api/student_records/3')
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual({r['module'] for r in response.json['records']}, {'Math', 'Private History'})
++        page = self.client.get('/student_dashboard?student_id=4')
++        self.assertEqual(page.status_code, 200)
++        self.assertNotIn(b'Physics', page.data)
++        self.assertEqual(self.client.get('/api/student_risk/3').status_code, 200)
++
++    def test_student_horizontal_idor_denied(self):
++        self.login(3)
++        for path in ['/api/student_records/4', '/api/student_risk/4', '/api/student_records/99999']:
++            with self.subTest(path=path):
++                response = self.client.get(path)
++                self.reject(response, self.snapshot())
++                self.assertEqual(response.json['error'], 'Forbidden')
++                self.assertNotIn(b'Physics', response.data)
++
++    def test_faculty_reads_only_assigned_modules(self):
++        self.login(2)
++        response = self.client.get('/api/student_records/3')
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual([r['module'] for r in response.json['records']], ['Math'])
++        page = self.client.get('/faculty_dashboard?student_id=4&faculty_id=5')
++        self.assertEqual(page.status_code, 200)
++        self.assertNotIn(b'Private History', page.data)
++        self.assertNotIn(b'Physics', page.data)
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
++
++    def test_faculty_writes_assigned_record_and_forces_teacher_identity(self):
++        self.login(2)
++        response = self.post('/faculty_dashboard', **self.record())
++        self.assertEqual(response.status_code, 302)
++        with self.db() as conn:
++            self.assertEqual(conn.execute("SELECT grade, teacher_name FROM grades WHERE module_name='Math'").fetchone(),
++                             (18.5, 'User 2'))
++            self.assertEqual(conn.execute("SELECT count FROM absences WHERE module_name='Math'").fetchone(), (1,))
++
++    def test_each_assignment_dimension_is_enforced(self):
++        self.login(2)
++        for change in [dict(student_id='4'), dict(module_name='Private History'),
++                       dict(academic_year='2025-2026'), dict(semester='2'), dict(student_id='99999')]:
++            with self.subTest(change=change):
++                payload = self.record()
++                payload.update(change)
++                before = self.snapshot()
++                self.reject(self.post('/faculty_dashboard', **payload), before)
++
++    def test_second_faculty_cannot_use_first_faculty_assignment(self):
++        self.login(5)
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'))
++
++    def test_new_record_for_assigned_module_can_be_created(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("DELETE FROM grades WHERE module_name='Math'")
++            conn.execute("DELETE FROM absences WHERE module_name='Math'")
++        self.assertEqual(self.post('/faculty_dashboard', **self.record()).status_code, 302)
++        self.assertEqual(len(self.client.get('/api/student_records/3').json['records']), 1)
++
++    def test_revoked_assignment_takes_effect_on_existing_session(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute('DELETE FROM faculty_assignments WHERE faculty_id=2')
++        before = self.snapshot()
++        self.reject(self.post('/faculty_dashboard', **self.record()), before)
++        self.reject(self.client.get('/api/student_records/3'), before)
++        self.assertNotIn(b'Math', self.client.get('/faculty_dashboard').data)
++
++    def test_cookie_role_forgery_does_not_elevate_student(self):
++        self.login(3)
++        with self.client.session_transaction() as sess:
++            sess['role'] = 'admin'
++            sess['name'] = 'Administrator'
++        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'))
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_form_and_query_role_forgery_does_not_elevate(self):
++        self.login(3)
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard?role=faculty', role='faculty', **self.record()))
++
++    def test_registration_always_creates_student(self):
++        self.client.get('/register')
++        self.assertEqual(self.post('/register?role=admin', name='New User', email='new@example.test',
++                                   password='pass', role='faculty', user_id='1').status_code, 302)
++        with self.db() as conn:
++            self.assertEqual(conn.execute("SELECT role FROM users WHERE email='new@example.test'").fetchone(), ('student',))
++
++    def test_database_demotion_immediately_revokes_admin_session(self):
++        self.login(1)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='student' WHERE id=1")
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_database_demotion_immediately_revokes_faculty_session(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='student' WHERE id=2")
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++
++    def test_deleted_account_loses_existing_session(self):
++        self.login(3)
++        with self.db() as conn:
++            conn.execute('DELETE FROM users WHERE id=3')
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'), 401)
++
++    def test_unknown_database_role_fails_closed(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='unknown' WHERE id=2")
++        self.reject_unchanged(lambda: self.client.get('/faculty_dashboard'))
++        other = app.test_client()
++        other.get('/login')
++        with other.session_transaction() as sess:
++            token = sess['_csrf_token']
++        response = other.post('/login', data=dict(email='user6@example.test', password='password', csrf_token=token))
++        self.assertEqual(response.status_code, 200)
++        with other.session_transaction() as sess:
++            self.assertNotIn('user_id', sess)
++
++    def test_string_admin_session_and_hardcoded_admin_login_rejected(self):
++        self.client.get('/login')
++        response = self.post('/login', email='admin', password='admin')
++        self.assertEqual(response.status_code, 200)
++        with self.client.session_transaction() as sess:
++            sess['user_id'], sess['role'] = 'admin', 'admin'
++        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'), 401)
++
++    def test_denial_audit_contains_endpoint_and_actor(self):
++        self.login(2)
++        payload = self.record()
++        payload['student_id'] = '4'
++        self.assertEqual(self.post('/faculty_dashboard', **payload).status_code, 403)
++        with self.db() as conn:
++            row = conn.execute("SELECT user_id, success, details FROM audit_logs WHERE action='UNAUTHORIZED_ACCESS'").fetchone()
++        self.assertEqual(row[:2], ('2', 0))
++        self.assertIn('POST /faculty_dashboard', row[2])
++
++    def test_authorized_faculty_still_requires_csrf(self):
++        self.login(2)
++        before = self.snapshot()
++        self.reject(self.client.post('/faculty_dashboard', data=self.record()), before, 400)
++        self.reject(self.post('/faculty_dashboard', **{**self.record(), 'csrf_token': 'wrong'}), before, 400)
++
++    def test_authorized_faculty_still_requires_valid_inputs(self):
++        self.login(2)
++        for change in [dict(grade='99'), dict(grade='nan'), dict(absences='-1'), dict(semester='3')]:
++            with self.subTest(change=change):
++                before = self.snapshot()
++                self.reject(self.post('/faculty_dashboard', **{**self.record(), **change}), before, 400)
++
++    def test_admin_normal_read_write_and_exports(self):
++        self.login(1)
++        self.assertEqual(self.post('/admin_dashboard', **self.record()).status_code, 302)
++        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution', '/api/student_risk/3',
++                     '/api/student_records/4', '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.assertEqual(self.client.get(path).status_code, 200)
++
++    def test_logout_invalidates_access_and_get_logout_is_disabled(self):
++        self.login(3)
++        self.assertEqual(self.client.get('/logout').status_code, 405)
++        self.assertEqual(self.post('/logout').status_code, 302)
++        self.reject_unchanged(lambda: self.client.get('/student_dashboard'), 401)
++
++    def test_missing_student_admin_returns_404(self):
++        self.login(1)
++        self.assertEqual(self.client.get('/api/student_records/999').status_code, 404)
++        self.assertEqual(self.client.get('/api/student_risk/999').status_code, 404)
++
++    def test_additive_migration_is_idempotent(self):
++        before = self.snapshot()
++        with redirect_stdout(io.StringIO()):
++            init_db()
++            init_db()
++        self.assertEqual(self.snapshot(), before)
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)
