@@ -10,6 +10,7 @@ import json
 from fpdf import FPDF  # Using fpdf2 instead of pdfkit
 from collections import defaultdict
 import os
+from audit_logger import log_event
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
@@ -132,6 +133,12 @@ def admin_required(f):
         if 'user_id' not in session:
             return redirect(url_for('login'))
         if session.get('role') != 'admin':
+            log_event(
+                user_id=session.get('user_id'),
+                action='UNAUTHORIZED_ACCESS',
+                success=False,
+                details='Attempted to access an admin-only resource'
+            )
             flash('Access denied. Admin privileges required.')
             return redirect(url_for('student_dashboard'))
         return f(*args, **kwargs)
@@ -244,6 +251,12 @@ def login():
             session['user_id'] = 'admin'
             session['role'] = 'admin'
             session['name'] = 'Administrator'
+            log_event(
+            user_id='admin',
+            action='LOGIN',
+            success=True,
+            details='Administrator login successful'
+        )
             return redirect(url_for('admin_dashboard'))
         
         # Check for student login
@@ -257,8 +270,20 @@ def login():
             session['user_id'] = user[0]
             session['role'] = user[3]
             session['name'] = user[1]
+            log_event(
+                user_id=user[0],
+                action='LOGIN',
+                success=True,
+                details='Student login successful'
+            )
             return redirect(url_for('student_dashboard'))
         else:
+            log_event(
+                user_id=email,
+                action='LOGIN',
+                success=False,
+                details='Invalid login credentials'
+            )
             flash('Invalid email or password')
     
     return render_template('login.html')
@@ -290,6 +315,13 @@ def register():
         
         conn.commit()
         conn.close()
+        
+        log_event(
+            user_id=student_id,
+            action='STUDENT_REGISTERED',
+            success=True,
+            details='New student account registered'
+        )
         
         flash('Registration successful! Please login.')
         return redirect(url_for('login'))
@@ -352,7 +384,13 @@ def admin_dashboard():
         
         conn.commit()
         conn.close()
-        
+
+        log_event(
+            user_id=session.get('user_id'),
+            action='STUDENT_RECORD_UPDATED',
+            success=True,
+            details=f'Student ID {student_id}: grade and attendance data saved'
+        )
         flash('Student data updated successfully!')
         return redirect(url_for('admin_dashboard'))
     
