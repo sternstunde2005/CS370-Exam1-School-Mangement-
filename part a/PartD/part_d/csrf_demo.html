@@ -1,0 +1,11 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Part D local CSRF demo</title>
+<h1>Local CSRF test</h1><p>Sign in as admin on 127.0.0.1:5001 first. This form has no CSRF token.</p>
+<form method="post" action="http://127.0.0.1:5001/admin_dashboard">
+<input type="hidden" name="student_id" value="1">
+<input type="hidden" name="module_name" value="CSRF Demo">
+<input type="hidden" name="grade" value="19">
+<input type="hidden" name="absences" value="0">
+<input type="hidden" name="teacher_name" value="Demo Teacher">
+<input type="hidden" name="academic_year" value="2024-2025">
+<input type="hidden" name="semester" value="1">
+<button>Submit local test</button></form></html>

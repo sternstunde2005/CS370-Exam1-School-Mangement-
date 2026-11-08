@@ -1,0 +1,369 @@
+{
+  "executed_at": "2026-11-08T21:50:30.243344+00:00",
+  "method": "Flask test client, isolated copies of supplied fictional database",
+  "results": {
+    "before": [
+      {
+        "test": "CSRF missing",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "CSRF incorrect",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "CSRF other session",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation grade='99'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation grade='-1'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation grade='nan'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation grade='inf'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation grade='abc'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation absences='-5'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation absences='1.5'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation student_id='999999999'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation module_name=''",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation module_name='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation teacher_name='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation academic_year='2024-2030'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Validation semester='3'",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "database_changed": true
+        }
+      },
+      {
+        "test": "Valid grade 0",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 0.0
+        }
+      },
+      {
+        "test": "Valid grade 20",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 20.0
+        }
+      },
+      {
+        "test": "Valid grade 15.5",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 15.5
+        }
+      }
+    ],
+    "after": [
+      {
+        "test": "CSRF missing",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "CSRF incorrect",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "CSRF other session",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation grade='99'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation grade='-1'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation grade='nan'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation grade='inf'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation grade='abc'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation absences='-5'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation absences='1.5'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation student_id='999999999'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation module_name=''",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation module_name='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation teacher_name='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation academic_year='2024-2030'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Validation semester='3'",
+        "passed": true,
+        "observed": {
+          "status": 400,
+          "database_changed": false
+        }
+      },
+      {
+        "test": "Valid grade 0",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 0.0
+        }
+      },
+      {
+        "test": "Valid grade 20",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 20.0
+        }
+      },
+      {
+        "test": "Valid grade 15.5",
+        "passed": true,
+        "observed": {
+          "status": 302,
+          "stored_grade": 15.5
+        }
+      },
+      {
+        "test": "Regression /admin_dashboard",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Regression /analytics",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Regression /api/performance_evolution",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Regression /export_data?format=csv",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Regression /export_data?format=excel",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Regression /export_data?format=pdf",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "GET logout refused",
+        "passed": true,
+        "observed": 405
+      },
+      {
+        "test": "POST logout succeeds",
+        "passed": true,
+        "observed": 302
+      },
+      {
+        "test": "Stale token refused",
+        "passed": true,
+        "observed": 400
+      },
+      {
+        "test": "Student login and dashboard",
+        "passed": true,
+        "observed": 200
+      },
+      {
+        "test": "Registration form works",
+        "passed": true,
+        "observed": 302
+      }
+    ]
+  }
+}
