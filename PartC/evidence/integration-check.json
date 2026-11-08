@@ -1,0 +1,28 @@
+{
+  "patch_check_passed": true,
+  "patch_applied_to": "clean Part D website baseline",
+  "applied_source_matches_delivery": true,
+  "compared_files": [
+    "app.py",
+    "audit_logger.py",
+    "manage_access.py",
+    "README.md",
+    "requirements.txt",
+    "run.py",
+    "security_c.py",
+    "security_d.py",
+    "setup_demo.py",
+    "test_audit_logger.py",
+    "test_permissions.py",
+    "templates/admin_dashboard.html",
+    "templates/analytics.html",
+    "templates/base.html",
+    "templates/faculty_dashboard.html",
+    "templates/login.html",
+    "templates/pdf_report.html",
+    "templates/register.html",
+    "templates/student_dashboard.html"
+  ],
+  "merged_version_tests_run": 34,
+  "merged_version_passed": true
+}

@@ -1,0 +1,7 @@
+{
+  "upstream": "https://github.com/zaydkassimi/school-management",
+  "upstream_commit": "cb6035cebfd40da5a244e2671d3a9631018e25a2",
+  "reference": "https://github.com/sternstunde2005/CS370-Exam1-School-Mangement-",
+  "reference_commit": "c615cab1dd7513f36f84084bb0f7759e8212666e",
+  "direct_baseline": "part a/PartD/website"
+}
