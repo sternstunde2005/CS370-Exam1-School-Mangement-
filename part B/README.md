@@ -16,7 +16,7 @@ python website/setup_demo.py
 python website/run.py
 ```
 
-Open http://127.0.0.1:5000. `setup_demo.py` refuses to overwrite an existing database. It creates fictional data only. On Windows, use `py -m venv .venv` and `.venv\Scripts\activate` in place of the first two commands; remaining commands are the same. The team's old bundled Windows Python runtime does not include Argon2; use the new virtual environment.
+Open http://127.0.0.1:5001. `setup_demo.py` refuses to overwrite an existing database. It creates fictional data only. On Windows, use `py -m venv .venv` and `.venv\Scripts\activate` in place of the first two commands; remaining commands are the same. The team's old bundled Windows Python runtime does not include Argon2; use the new virtual environment.
 
 | Account username (email used as login ID) | Password | Role |
 |---|---|---|
