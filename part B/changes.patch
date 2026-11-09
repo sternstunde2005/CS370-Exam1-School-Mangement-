@@ -1,0 +1,3171 @@
+--- a/PartC/website/app.py
++++ b/PartC/website/app.py
+@@ -1,1059 +1,1056 @@
+-from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file, make_response
+-import sqlite3
+-import hashlib
+-import secrets
+-from security_d import install_csrf, validate_academic_record
+-from flask import abort, g
+-from pathlib import Path
+-from security_c import (install_rbac, roles_required, connect_db,
+-                        require_assignment, read_records, deny, ROLES)
+-from functools import wraps
+-# import pandas as pd  # Removed due to Python 3.13 compatibility issues
+-import io
+-import csv
+-from datetime import datetime
+-import json
+-from fpdf import FPDF  # Using fpdf2 instead of pdfkit
+-from collections import defaultdict
+-import os
+-from audit_logger import log_event
+-
+-app = Flask(__name__)
+-app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+-app.config['DATABASE'] = str(Path(__file__).resolve().parent / 'school.db')
+-install_rbac(app, log_event)
+-install_csrf(app)
+-
+-# Database initialization
+-def init_db():
+-    print("Initializing database...")
+-    
+-    # Only create database if it doesn't exist
+-    database_exists = os.path.exists(app.config['DATABASE'])
+-    
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Create users table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS users (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            name TEXT NOT NULL,
+-            email TEXT UNIQUE NOT NULL,
+-            password TEXT NOT NULL,
+-            role TEXT NOT NULL
+-        )
+-    ''')
+-    print("Created users table")
+-    
+-    # Create grades table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS grades (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            student_id INTEGER NOT NULL,
+-            module_name TEXT NOT NULL,
+-            grade REAL NOT NULL,
+-            teacher_name TEXT,
+-            academic_year TEXT DEFAULT '2024-2025',
+-            semester TEXT DEFAULT '1',
+-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+-            FOREIGN KEY (student_id) REFERENCES users (id)
+-        )
+-    ''')
+-    print("Created grades table")
+-    
+-    # Create absences table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS absences (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            student_id INTEGER NOT NULL,
+-            module_name TEXT DEFAULT NULL,
+-            count INTEGER DEFAULT 0,
+-            total_hours INTEGER DEFAULT 0,
+-            academic_year TEXT DEFAULT '2024-2025',
+-            semester TEXT DEFAULT '1',
+-            FOREIGN KEY (student_id) REFERENCES users (id)
+-        )
+-    ''')
+-    print("Created absences table")
+-    
+-    # Create classes table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS classes (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            name TEXT NOT NULL,
+-            academic_year TEXT DEFAULT '2024-2025',
+-            teacher_name TEXT
+-        )
+-    ''')
+-    print("Created classes table")
+-    
+-    # Create student_class table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS student_class (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            student_id INTEGER NOT NULL,
+-            class_id INTEGER NOT NULL,
+-            FOREIGN KEY (student_id) REFERENCES users (id),
+-            FOREIGN KEY (class_id) REFERENCES classes (id)
+-        )
+-    ''')
+-    print("Created student_class table")
+-    
+-    # Create risk_thresholds table
+-    cursor.execute('''
+-        CREATE TABLE IF NOT EXISTS risk_thresholds (
+-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+-            min_grade REAL DEFAULT 10.0,
+-            max_absences INTEGER DEFAULT 10,
+-            risk_level TEXT DEFAULT 'medium'
+-        )
+-    ''')
+-    print("Created risk_thresholds table")
+-    
+-    # Insert default risk threshold
+-    cursor.execute('SELECT COUNT(*) FROM risk_thresholds')
+-    if cursor.fetchone()[0] == 0:
+-        cursor.execute('INSERT INTO risk_thresholds (min_grade, max_absences, risk_level) VALUES (10.0, 10, "medium")')
+-        print("Inserted default risk threshold")
+-    
+-    cursor.execute("""
+-        CREATE TABLE IF NOT EXISTS faculty_assignments (
+-            faculty_id INTEGER NOT NULL REFERENCES users(id),
+-            student_id INTEGER NOT NULL REFERENCES users(id),
+-            module_name TEXT NOT NULL,
+-            academic_year TEXT NOT NULL,
+-            semester TEXT NOT NULL,
+-            PRIMARY KEY (faculty_id, student_id, module_name, academic_year, semester)
+-        )
+-    """)
+-    print("Database initialization completed successfully")
+-    conn.commit()
+-    conn.close()
+-    
+-    if not database_exists:
+-        print("New database created. You can now add students and data.")
+-    else:
+-        print("Existing database loaded. Your data is preserved.")
+-
+-# Part C: role authority comes from the database on every request.
+-login_required = roles_required('student', 'faculty', 'admin')
+-admin_required = roles_required('admin')
+-
+-# Hash password
+-def hash_password(password):
+-    return hashlib.sha256(password.encode()).hexdigest()
+-
+-# Get risk level for a student
+-def get_student_risk_level(student_id):
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get student's average grade
+-    cursor.execute('''
+-        SELECT AVG(grade) FROM grades WHERE student_id = ?
+-    ''', (student_id,))
+-    avg_grade = cursor.fetchone()[0] or 0
+-    
+-    # Get student's total absences across all modules
+-    cursor.execute('SELECT SUM(count) FROM absences WHERE student_id = ?', (student_id,))
+-    total_absences_result = cursor.fetchone()
+-    total_absences = total_absences_result[0] if total_absences_result and total_absences_result[0] else 0
+-    
+-    # Get risk thresholds
+-    cursor.execute('SELECT min_grade, max_absences FROM risk_thresholds LIMIT 1')
+-    threshold = cursor.fetchone()
+-    min_grade, max_absences = threshold if threshold else (10.0, 10)
+-    
+-    conn.close()
+-    
+-    # Calculate risk level
+-    if avg_grade < min_grade and total_absences > max_absences:
+-        return 'high'
+-    elif avg_grade < min_grade or total_absences > max_absences:
+-        return 'medium'
+-    else:
+-        return 'low'
+-
+-# Get student ranking
+-def get_student_ranking(student_id):
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get all students with their average grades
+-    cursor.execute('''
+-        SELECT u.id, u.name, AVG(g.grade) as avg_grade
+-        FROM users u
+-        LEFT JOIN grades g ON u.id = g.student_id
+-        WHERE u.role = 'student'
+-        GROUP BY u.id, u.name
+-        ORDER BY avg_grade DESC
+-    ''')
+-    
+-    students = cursor.fetchall()
+-    conn.close()
+-    
+-    # Find student's position
+-    for i, (sid, name, avg_grade) in enumerate(students, 1):
+-        if sid == student_id:
+-            return i, len(students), avg_grade or 0
+-    
+-    return None, len(students), 0
+-
+-# Get student performance evolution over semesters
+-def get_student_evolution(student_id):
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get student's grades across semesters
+-    cursor.execute('''
+-        SELECT academic_year, semester, AVG(grade) as avg_grade,
+-               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
+-               COUNT(*) as total
+-        FROM grades
+-        WHERE student_id = ?
+-        GROUP BY academic_year, semester
+-        ORDER BY academic_year, semester
+-    ''', (student_id,))
+-    
+-    evolution_data = cursor.fetchall()
+-    conn.close()
+-    
+-    # Process data for visualization
+-    result = []
+-    for year, semester, avg_grade, passed, total in evolution_data:
+-        success_rate = (passed / total * 100) if total > 0 else 0
+-        result.append({
+-            'period': f"{year} S{semester}",
+-            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
+-            'success_rate': round(success_rate, 1)
+-        })
+-    
+-    return result
+-
+-# Routes
+-@app.route('/')
+-def index():
+-    return redirect(url_for('login'))
+-
+-@app.route('/login', methods=['GET', 'POST'])
+-def login():
+-    if request.method == 'POST':
+-        email = request.form['email']
+-        password = request.form['password']
+-        
+-        # All roles authenticate against users; no special admin password.
+-        conn = sqlite3.connect(app.config['DATABASE'])
+-        cursor = conn.cursor()
+-        cursor.execute('SELECT id, name, password, role FROM users WHERE email = ?', (email,))
+-        user = cursor.fetchone()
+-        conn.close()
+-        
+-        if user and user[2] == hash_password(password) and user[3] in ROLES:
+-            session.clear()
+-            session['user_id'] = user[0]
+-            session['role'] = user[3]
+-            session['name'] = user[1]
+-            log_event(
+-                user_id=user[0],
+-                action='LOGIN',
+-                success=True,
+-                details=f'{user[3]} login successful'
+-            )
+-            return redirect(url_for({'student': 'student_dashboard', 'faculty': 'faculty_dashboard', 'admin': 'admin_dashboard'}[user[3]]))
+-        else:
+-            log_event(
+-                user_id=email,
+-                action='LOGIN',
+-                success=False,
+-                details='Invalid login credentials'
+-            )
+-            flash('Invalid email or password')
+-    
+-    return render_template('login.html')
+-
+-@app.route('/register', methods=['GET', 'POST'])
+-def register():
+-    if request.method == 'POST':
+-        name = request.form['name']
+-        email = request.form['email']
+-        password = request.form['password']
+-        
+-        conn = sqlite3.connect(app.config['DATABASE'])
+-        cursor = conn.cursor()
+-        
+-        # Check if email already exists
+-        cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
+-        if cursor.fetchone():
+-            flash('Email already registered')
+-            conn.close()
+-            return render_template('register.html')
+-        
+-        # Insert new user
+-        hashed_password = hash_password(password)
+-        cursor.execute('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)', 
+-                      (name, email, hashed_password, 'student'))
+-        
+-        # Create default absence record for new student
+-        student_id = cursor.lastrowid
+-        
+-        conn.commit()
+-        conn.close()
+-        
+-        log_event(
+-            user_id=student_id,
+-            action='STUDENT_REGISTERED',
+-            success=True,
+-            details='New student account registered'
+-        )
+-        
+-        flash('Registration successful! Please login.')
+-        return redirect(url_for('login'))
+-    
+-    return render_template('register.html')
+-
+-@app.route('/admin_dashboard', methods=['GET', 'POST'])
+-@admin_required
+-def admin_dashboard():
+-    if request.method == 'POST':
+-        save_academic_record()
+-        flash('Student data updated successfully!')
+-        return redirect(url_for('admin_dashboard'))
+-
+-    # Get filter parameters
+-    academic_year = request.args.get('academic_year', '2024-2025')
+-    module_filter = request.args.get('module', '')
+-    teacher_filter = request.args.get('teacher', '')
+-    risk_filter = request.args.get('risk', '')
+-    semester_filter = request.args.get('semester', '')
+-    
+-    # Get all students with their grades and absences
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Build query with filters
+-    query = '''
+-        SELECT u.id, u.name, u.email, 
+-               g.module_name,
+-               g.grade,
+-               COALESCE(a.count, 0) as absences,
+-               g.teacher_name,
+-               g.academic_year,
+-               g.semester
+-        FROM users u
+-        LEFT JOIN grades g ON u.id = g.student_id
+-        LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
+-                                AND g.academic_year = a.academic_year AND g.semester = a.semester)
+-        WHERE u.role = 'student'
+-    '''
+-    
+-    params = []
+-    if academic_year:
+-        query += ' AND (g.academic_year = ? OR g.academic_year IS NULL)'
+-        params.append(academic_year)
+-    if module_filter:
+-        query += ' AND g.module_name LIKE ?'
+-        params.append(f'%{module_filter}%')
+-    if teacher_filter:
+-        query += ' AND g.teacher_name LIKE ?'
+-        params.append(f'%{teacher_filter}%')
+-    if semester_filter:
+-        query += ' AND g.semester = ?'
+-        params.append(semester_filter)
+-    
+-    query += ' ORDER BY u.name'
+-    
+-    try:
+-        cursor.execute(query, params)
+-        students_data = cursor.fetchall()
+-        
+-        # Get unique values for filters
+-        cursor.execute('SELECT DISTINCT academic_year FROM grades WHERE academic_year IS NOT NULL')
+-        academic_years = [row[0] for row in cursor.fetchall()]
+-        
+-        cursor.execute('SELECT DISTINCT module_name FROM grades WHERE module_name IS NOT NULL')
+-        modules = [row[0] for row in cursor.fetchall()]
+-        
+-        cursor.execute('SELECT DISTINCT teacher_name FROM grades WHERE teacher_name IS NOT NULL')
+-        teachers = [row[0] for row in cursor.fetchall()]
+-        
+-        cursor.execute('SELECT DISTINCT semester FROM grades WHERE semester IS NOT NULL')
+-        semesters = [row[0] for row in cursor.fetchall()]
+-        
+-        # Process data to group by student
+-        students = {}
+-        for row in students_data:
+-            if len(row) < 9:  # Skip incomplete rows
+-                continue
+-                
+-            student_id, name, email, module_name, grade, absences, teacher_name, year, semester = row
+-            
+-            if student_id not in students:
+-                students[student_id] = {
+-                    'id': student_id,
+-                    'name': name,
+-                    'email': email,
+-                    'absences': absences,
+-                    'modules': [],
+-                    'risk_level': get_student_risk_level(student_id),
+-                    'avg_grade': 0,
+-                    'total_modules': 0
+-                }
+-            
+-            if module_name:  # Only add if module name exists
+-                students[student_id]['modules'].append({
+-                    'name': module_name,
+-                    'grade': grade,
+-                    'status': 'Admis' if grade >= 10 else 'Non Admis',
+-                    'teacher': teacher_name,
+-                    'year': year,
+-                    'semester': semester,
+-                    'absences': absences
+-                })
+-                students[student_id]['total_modules'] += 1
+-                students[student_id]['avg_grade'] += grade
+-        
+-        # Calculate average grades
+-        for student in students.values():
+-            if student['total_modules'] > 0:
+-                student['avg_grade'] = student['avg_grade'] / student['total_modules']
+-        
+-        # Apply risk filter
+-        if risk_filter:
+-            students = {k: v for k, v in students.items() if v['risk_level'] == risk_filter}
+-    except Exception as e:
+-        flash(f'Error: {str(e)}')
+-        students = {}
+-        academic_years = []
+-        modules = []
+-        teachers = []
+-        semesters = []
+-    
+-    conn.close()
+-    
+-    return render_template('admin_dashboard.html', 
+-                         students=students.values(),
+-                         academic_years=academic_years,
+-                         modules=modules,
+-                         teachers=teachers,
+-                         semesters=semesters,
+-                         current_filters={
+-                             'academic_year': academic_year,
+-                             'module': module_filter,
+-                             'teacher': teacher_filter,
+-                             'risk': risk_filter,
+-                             'semester': semester_filter
+-                         })
+-
+-@app.route('/student_dashboard')
+-@roles_required('student')
+-def student_dashboard():    
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get student's grades with absences for each module
+-    cursor.execute('''
+-        SELECT g.module_name, g.grade, g.teacher_name, g.academic_year, g.semester,
+-               COALESCE(a.count, 0) as absences
+-        FROM grades g
+-        LEFT JOIN absences a ON (g.student_id = a.student_id AND g.module_name = a.module_name 
+-                                AND g.academic_year = a.academic_year AND g.semester = a.semester)
+-        WHERE g.student_id = ? 
+-        ORDER BY g.academic_year, g.semester, g.module_name
+-    ''', (session['user_id'],))
+-    grades = cursor.fetchall()
+-    
+-    conn.close()
+-    
+-    # Process grades with status
+-    processed_grades = []
+-    total_absences = 0
+-    
+-    for module_name, grade, teacher_name, academic_year, semester, module_absences in grades:
+-        processed_grades.append({
+-            'module': module_name,
+-            'grade': grade,
+-            'status': 'Admis' if grade >= 10 else 'Non Admis',
+-            'teacher': teacher_name,
+-            'year': academic_year,
+-            'semester': semester,
+-            'absences': module_absences
+-        })
+-        total_absences += module_absences
+-    
+-    # Get risk level and ranking
+-    risk_level = get_student_risk_level(session['user_id'])
+-    ranking, total_students, avg_grade = get_student_ranking(session['user_id'])
+-    
+-    # Get performance evolution
+-    evolution_data = get_student_evolution(session['user_id'])
+-    
+-    return render_template('student_dashboard.html', 
+-                         grades=processed_grades, 
+-                         total_absences=total_absences,
+-                         name=session['name'],
+-                         risk_level=risk_level,
+-                         ranking=ranking,
+-                         total_students=total_students,
+-                         avg_grade=avg_grade,
+-                         evolution_data=evolution_data)
+-
+-@app.route('/analytics')
+-@admin_required
+-def analytics():
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get overall statistics
+-    cursor.execute('SELECT COUNT(*) FROM users WHERE role = "student"')
+-    total_students = cursor.fetchone()[0]
+-    
+-    cursor.execute('SELECT AVG(grade) FROM grades')
+-    overall_avg = cursor.fetchone()[0] or 0
+-    
+-    cursor.execute('SELECT COUNT(*) FROM grades WHERE grade < 10')
+-    failed_modules = cursor.fetchone()[0]
+-    
+-    cursor.execute('SELECT COUNT(*) FROM grades')
+-    total_modules = cursor.fetchone()[0]
+-    
+-    # Get students at risk (with only unique student names and total absences across all modules)
+-    cursor.execute('''
+-        SELECT u.name, AVG(g.grade) as avg_grade,
+-        (SELECT SUM(count) FROM absences WHERE student_id = u.id) as absences
+-        FROM users u
+-        LEFT JOIN grades g ON u.id = g.student_id
+-        WHERE u.role = 'student'
+-        GROUP BY u.id, u.name
+-        HAVING avg_grade < 10 OR absences > 10
+-    ''')
+-    at_risk_students = cursor.fetchall()
+-    
+-    # Get module performance
+-    cursor.execute('''
+-        SELECT module_name, AVG(grade) as avg_grade, COUNT(*) as student_count
+-        FROM grades
+-        GROUP BY module_name
+-        ORDER BY avg_grade DESC
+-    ''')
+-    module_performance = cursor.fetchall()
+-    
+-    # Get performance evolution by semester
+-    cursor.execute('''
+-        SELECT academic_year, semester, 
+-               AVG(grade) as avg_grade,
+-               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
+-               COUNT(*) as total
+-        FROM grades
+-        GROUP BY academic_year, semester
+-        ORDER BY academic_year, semester
+-    ''')
+-    
+-    performance_evolution = []
+-    for year, semester, avg_grade, passed, total in cursor.fetchall():
+-        success_rate = (passed / total * 100) if total > 0 else 0
+-        performance_evolution.append({
+-            'period': f"{year} S{semester}",
+-            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
+-            'success_rate': round(success_rate, 1)
+-        })
+-    
+-    conn.close()
+-    
+-    return render_template('analytics.html',
+-                         total_students=total_students,
+-                         overall_avg=overall_avg,
+-                         failed_modules=failed_modules,
+-                         total_modules=total_modules,
+-                         at_risk_students=at_risk_students,
+-                         module_performance=module_performance,
+-                         performance_evolution=performance_evolution)
+-
+-@app.route('/export_data')
+-@admin_required
+-def export_data():
+-    format_type = request.args.get('format', 'csv')
+-    
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    
+-    if format_type == 'excel':
+-        # Create Excel file with simplified pandas approach
+-        query = '''
+-            SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
+-                   g.academic_year, g.semester, 
+-                   COALESCE(a.count, 0) as absences
+-            FROM users u
+-            LEFT JOIN grades g ON u.id = g.student_id
+-            LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
+-                                    AND g.academic_year = a.academic_year AND g.semester = a.semester)
+-            WHERE u.role = 'student'
+-            ORDER BY u.name, g.academic_year, g.semester, g.module_name
+-        '''
+-        
+-        try:
+-            # Get data using cursor instead of pandas
+-            cursor = conn.cursor()
+-            cursor.execute(query)
+-            data = cursor.fetchall()
+-            
+-            # Process data manually
+-            processed_data = []
+-            for row in data:
+-                grade = row[3]
+-                status = 'Admis' if grade and grade >= 10 else 'Non Admis' if grade is not None else 'N/A'
+-                processed_row = [
+-                    row[0],  # Student Name
+-                    row[1],  # Email
+-                    row[2] or 'N/A',  # Module
+-                    f"{grade:.2f}" if grade is not None else 'N/A',  # Grade
+-                    row[4] or 'N/A',  # Teacher
+-                    row[5] or 'N/A',  # Academic Year
+-                    row[6] or 'N/A',  # Semester
+-                    str(row[7]),  # Absences
+-                    status  # Status
+-                ]
+-                processed_data.append(processed_row)
+-            
+-            # Calculate summary data
+-            students = set([row[0] for row in data])
+-            total_students = len(students)
+-            grades = [row[3] for row in data if row[3] is not None]
+-            avg_grade = sum(grades) / len(grades) if grades else 0
+-            passed = len([g for g in grades if g >= 10])
+-            failed = len(grades) - passed
+-            success_rate = (passed / len(grades) * 100) if grades else 0
+-            
+-            # Create Excel file using openpyxl directly
+-            from openpyxl import Workbook
+-            wb = Workbook()
+-            
+-            # Student Data sheet
+-            ws1 = wb.active
+-            ws1.title = "Student Data"
+-            headers = ['Student Name', 'Email', 'Module', 'Grade', 'Teacher', 
+-                      'Academic Year', 'Semester', 'Absences', 'Status']
+-            ws1.append(headers)
+-            
+-            for row in processed_data:
+-                ws1.append(row)
+-            
+-            # Summary sheet
+-            ws2 = wb.create_sheet("Summary")
+-            summary_headers = ['Metric', 'Value']
+-            ws2.append(summary_headers)
+-            ws2.append(['Total Students', total_students])
+-            ws2.append(['Overall Average', f"{avg_grade:.2f}/20"])
+-            ws2.append(['Success Rate', f"{success_rate:.1f}%"])
+-            ws2.append(['Failed Modules', failed])
+-            
+-            # Save to memory
+-            output = io.BytesIO()
+-            wb.save(output)
+-            output.seek(0)
+-            conn.close()
+-            
+-            # Send as Excel file
+-            return send_file(
+-                output,
+-                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+-                as_attachment=True,
+-                download_name=f'student_data_{datetime.now().strftime("%Y%m%d")}.xlsx'
+-            )
+-            
+-        except Exception as e:
+-            conn.close()
+-            return f"Error generating export file: {str(e)}", 500
+-    
+-    elif format_type == 'pdf':
+-        try:
+-            # Create PDF report using FPDF (no external dependencies)
+-            cursor = conn.cursor()
+-            
+-            # Get student data with proper join between grades and absences
+-            cursor.execute('''
+-                SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
+-                       g.academic_year, g.semester, 
+-                       COALESCE(a.count, 0) as absences
+-                FROM users u
+-                LEFT JOIN grades g ON u.id = g.student_id
+-                LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
+-                                        AND g.academic_year = a.academic_year AND g.semester = a.semester)
+-                WHERE u.role = 'student'
+-                ORDER BY u.name, g.academic_year, g.semester, g.module_name
+-            ''')
+-            student_data = cursor.fetchall()
+-            
+-            # Get overall statistics
+-            cursor.execute('SELECT COUNT(*) FROM users WHERE role = "student"')
+-            total_students = cursor.fetchone()[0]
+-            
+-            cursor.execute('SELECT AVG(grade) FROM grades')
+-            overall_avg = cursor.fetchone()[0] or 0
+-            
+-            cursor.execute('SELECT COUNT(*) FROM grades WHERE grade < 10')
+-            failed_modules = cursor.fetchone()[0]
+-            
+-            cursor.execute('SELECT COUNT(*) FROM grades')
+-            total_modules = cursor.fetchone()[0]
+-            
+-            success_rate = ((total_modules - failed_modules) / total_modules * 100) if total_modules > 0 else 0
+-            
+-            # Get at-risk students for the report
+-            cursor.execute('''
+-                SELECT u.name, AVG(g.grade) as avg_grade,
+-                (SELECT SUM(count) FROM absences WHERE student_id = u.id) as absences
+-                FROM users u
+-                LEFT JOIN grades g ON u.id = g.student_id
+-                WHERE u.role = 'student'
+-                GROUP BY u.id, u.name
+-                HAVING avg_grade < 10 OR absences > 10
+-            ''')
+-            at_risk_students = cursor.fetchall()
+-            
+-            # Get module performance
+-            cursor.execute('''
+-                SELECT module_name, AVG(grade) as avg_grade, COUNT(*) as student_count
+-                FROM grades
+-                GROUP BY module_name
+-                ORDER BY avg_grade DESC
+-            ''')
+-            module_performance = cursor.fetchall()
+-            
+-            conn.close()
+-            
+-            # Create PDF using FPDF
+-            class PDF(FPDF):
+-                def header(self):
+-                    # Logo - if you have one
+-                    # self.image('logo.png', 10, 8, 33)
+-                    self.set_font('Arial', 'B', 15)
+-                    self.cell(0, 10, 'School Management System - Performance Report', 0, 1, 'C')
+-                    self.set_font('Arial', 'I', 10)
+-                    self.cell(0, 10, f'Generated on {datetime.now().strftime("%d/%m/%Y")}', 0, 1, 'C')
+-                    self.ln(5)
+-                
+-                def footer(self):
+-                    self.set_y(-15)
+-                    self.set_font('Arial', 'I', 8)
+-                    self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+-                
+-                def section_title(self, title):
+-                    self.set_font('Arial', 'B', 12)
+-                    self.set_fill_color(100, 149, 237)  # Cornflower blue
+-                    self.cell(0, 10, title, 0, 1, 'L', True)
+-                    self.ln(5)
+-                
+-                def table_header(self, headers):
+-                    self.set_font('Arial', 'B', 10)
+-                    self.set_fill_color(200, 220, 255)
+-                    
+-                    # Calculate column widths based on content
+-                    col_widths = []
+-                    total_width = self.w - 20  # Page width minus margins
+-                    
+-                    # Simple algorithm - divide equally for now
+-                    col_width = total_width / len(headers)
+-                    
+-                    for header in headers:
+-                        self.cell(col_width, 7, header, 1, 0, 'C', True)
+-                    self.ln()
+-                
+-                def table_row(self, data, col_widths=None):
+-                    self.set_font('Arial', '', 9)
+-                    
+-                    if not col_widths:
+-                        # Use equal width for columns
+-                        col_width = (self.w - 20) / len(data)
+-                        col_widths = [col_width] * len(data)
+-                    
+-                    for i, item in enumerate(data):
+-                        # Convert any non-string data
+-                        if item is None:
+-                            item = 'N/A'
+-                        elif not isinstance(item, str):
+-                            item = str(item)
+-                        
+-                        # Make sure cell doesn't overflow to next page
+-                        if self.get_y() + 7 > self.page_break_trigger:
+-                            self.add_page()
+-                        
+-                        self.cell(col_widths[i], 7, item, 1, 0, 'L')
+-                    self.ln()
+-            
+-            # Initialize PDF
+-            pdf = PDF()
+-            pdf.set_auto_page_break(True, margin=15)
+-            pdf.add_page()
+-            
+-            # Summary section
+-            pdf.section_title('Performance Summary')
+-            pdf.set_font('Arial', '', 10)
+-            pdf.cell(40, 10, f'Total Students: {total_students}', 0, 0)
+-            pdf.cell(60, 10, f'Overall Average: {overall_avg:.2f}/20', 0, 0)
+-            pdf.cell(50, 10, f'Success Rate: {success_rate:.1f}%', 0, 0)
+-            pdf.cell(40, 10, f'Failed Modules: {failed_modules}/{total_modules}', 0, 1)
+-            pdf.ln(5)
+-            
+-            # Students at Risk section
+-            if at_risk_students:
+-                pdf.add_page()
+-                pdf.section_title('Students at Risk')
+-                
+-                # Table header
+-                headers = ['Student Name', 'Average Grade', 'Absences', 'Risk Level', 'Recommendations']
+-                pdf.table_header(headers)
+-                
+-                # Table data
+-                for name, avg_grade, absences in at_risk_students:
+-                    risk_level = 'High' if (avg_grade or 0) < 10 and absences > 10 else 'Medium'
+-                    recommendation = "Weekly tutoring + checks" if risk_level == "High" else "Study groups + practice"
+-                    pdf.table_row([name, f"{avg_grade:.2f}/20", str(absences), risk_level, recommendation])
+-                pdf.ln(10)
+-            
+-            # Module Performance section
+-            if module_performance:
+-                pdf.add_page()
+-                pdf.section_title('Module Performance')
+-                
+-                # Table header
+-                headers = ['Module', 'Average Grade', 'Students', 'Success Rate']
+-                pdf.table_header(headers)
+-                
+-                # Table data
+-                for module_name, avg_grade, student_count in module_performance:
+-                    module_success = (avg_grade / 20 * 100) if avg_grade else 0
+-                    pdf.table_row([
+-                        module_name, 
+-                        f"{avg_grade:.2f}/20", 
+-                        str(student_count), 
+-                        f"{module_success:.1f}%"
+-                    ])
+-                pdf.ln(10)
+-            
+-            # Student Performance Data section
+-            pdf.add_page()
+-            pdf.section_title('Student Performance Data')
+-            
+-            # Limit columns to fit on page - show most important ones
+-            headers = ['Name', 'Email', 'Module', 'Grade', 'Teacher', 'Absences']
+-            pdf.table_header(headers)
+-            
+-            # Table data (limited to key columns)
+-            for student in student_data:
+-                pdf.table_row([
+-                    student[0],    # name
+-                    student[1],    # email
+-                    student[2] or 'N/A',   # module
+-                    f"{student[3]:.2f}" if student[3] else 'N/A',  # grade
+-                    student[4] or 'N/A',   # teacher
+-                    str(student[7] or '0')  # absences
+-                ])
+-            
+-            # Get PDF as bytes
+-            pdf_payload = pdf.output()
+-            pdf_bytes = pdf_payload.encode('latin1') if isinstance(pdf_payload, str) else bytes(pdf_payload)
+-            
+-            # Return PDF file
+-            return send_file(
+-                io.BytesIO(pdf_bytes),
+-                mimetype='application/pdf',
+-                as_attachment=True,
+-                download_name=f'student_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+-            )
+-            
+-        except Exception as e:
+-            return f"Error generating report: {str(e)}", 500
+-    
+-    else:  # CSV
+-        cursor = conn.cursor()
+-        cursor.execute('''
+-            SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
+-                   g.academic_year, g.semester, 
+-                   COALESCE(a.count, 0) as absences
+-            FROM users u
+-            LEFT JOIN grades g ON u.id = g.student_id
+-            LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
+-                                    AND g.academic_year = a.academic_year AND g.semester = a.semester)
+-            WHERE u.role = 'student'
+-            ORDER BY u.name, g.academic_year, g.semester, g.module_name
+-        ''')
+-        
+-        data = cursor.fetchall()
+-        conn.close()
+-        
+-        # Create CSV in memory with improved formatting
+-        output = io.StringIO()
+-        writer = csv.writer(output)
+-        writer.writerow(['Name', 'Email', 'Module', 'Grade', 'Teacher', 'Academic Year', 'Semester', 'Absences', 'Status'])
+-        
+-        # Add status column and format grades
+-        formatted_data = []
+-        for row in data:
+-            # Calculate status
+-            grade = row[3]
+-            status = 'Admis' if grade and grade >= 10 else 'Non Admis' if grade is not None else 'N/A'
+-            
+-            # Format grade to 2 decimal places if not None
+-            formatted_grade = f"{grade:.2f}" if grade is not None else 'N/A'
+-            
+-            # Create new row with formatted data
+-            new_row = [
+-                row[0],                    # Name
+-                row[1],                    # Email
+-                row[2] or 'N/A',           # Module
+-                formatted_grade,           # Grade
+-                row[4] or 'N/A',           # Teacher
+-                row[5] or 'N/A',           # Academic Year
+-                row[6] or 'N/A',           # Semester
+-                str(row[7]),               # Absences
+-                status                     # Status
+-            ]
+-            formatted_data.append(new_row)
+-        
+-        # Write the formatted data
+-        writer.writerows(formatted_data)
+-        
+-        # Add summary data
+-        writer.writerow([])
+-        writer.writerow(['SUMMARY'])
+-        
+-        # Calculate summary metrics
+-        students = set([row[0] for row in data])
+-        total_students = len(students)
+-        grades = [row[3] for row in data if row[3] is not None]
+-        avg_grade = sum(grades) / len(grades) if grades else 0
+-        passed = len([g for g in grades if g >= 10])
+-        failed = len(grades) - passed
+-        success_rate = (passed / len(grades) * 100) if grades else 0
+-        
+-        # Write summary rows
+-        writer.writerow(['Total Students', total_students])
+-        writer.writerow(['Overall Average', f"{avg_grade:.2f}/20"])
+-        writer.writerow(['Success Rate', f"{success_rate:.1f}%"])
+-        writer.writerow(['Failed Modules', failed])
+-        
+-        output.seek(0)
+-        
+-        return send_file(
+-            io.BytesIO(output.getvalue().encode('utf-8')),
+-            mimetype='text/csv',
+-            as_attachment=True,
+-            download_name=f'student_data_{datetime.now().strftime("%Y%m%d")}.csv'
+-        )
+-
+-@app.route('/api/student_risk/<int:student_id>')
+-@roles_required('student', 'admin')
+-def api_student_risk(student_id):
+-    if g.user['role'] == 'student' and student_id != g.user['id']:
+-        deny(403, 'Students may only read their own risk assessment.')
+-    with connect_db() as conn:
+-        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
+-            abort(404)
+-    risk_level = get_student_risk_level(student_id)
+-    ranking, total_students, avg_grade = get_student_ranking(student_id)
+-    evolution_data = get_student_evolution(student_id)
+-    
+-    return jsonify({
+-        'risk_level': risk_level,
+-        'ranking': ranking,
+-        'total_students': total_students,
+-        'avg_grade': avg_grade,
+-        'evolution_data': evolution_data
+-    })
+-
+-@app.route('/api/performance_evolution')
+-@admin_required
+-def api_performance_evolution():
+-    conn = sqlite3.connect(app.config['DATABASE'])
+-    cursor = conn.cursor()
+-    
+-    # Get performance evolution by semester
+-    cursor.execute('''
+-        SELECT academic_year, semester, 
+-               AVG(grade) as avg_grade,
+-               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
+-               COUNT(*) as total
+-        FROM grades
+-        GROUP BY academic_year, semester
+-        ORDER BY academic_year, semester
+-    ''')
+-    
+-    performance_data = cursor.fetchall()
+-    conn.close()
+-    
+-    result = []
+-    for year, semester, avg_grade, passed, total in performance_data:
+-        success_rate = (passed / total * 100) if total > 0 else 0
+-        result.append({
+-            'period': f"{year} S{semester}",
+-            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
+-            'success_rate': round(success_rate, 1)
+-        })
+-    
+-    return jsonify(result)
+-
+-@app.route('/logout', methods=['POST'])
+-def logout():
+-    session.clear()
+-    return redirect(url_for('login'))
+-
+-def save_academic_record():
+-    try:
+-        student_id, module, grade, absences, teacher, year, semester = validate_academic_record(request.form)
+-    except ValueError as error:
+-        abort(400, description=str(error))
+-    with connect_db() as conn:
+-        # Lock before checking assignments so revocation cannot race this write.
+-        conn.execute('BEGIN IMMEDIATE')
+-        require_assignment(conn, student_id, module, year, semester)
+-        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
+-            abort(400, description='Choose an existing student.')
+-        if g.user['role'] == 'faculty':
+-            teacher = g.user['name']
+-        key = (student_id, module, year, semester)
+-        exists = conn.execute('''SELECT 1 FROM grades WHERE student_id = ?
+-            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
+-        if exists:
+-            conn.execute('''UPDATE grades SET grade = ?, teacher_name = ? WHERE student_id = ?
+-                AND module_name = ? AND academic_year = ? AND semester = ?''', (grade, teacher, *key))
+-        else:
+-            conn.execute('''INSERT INTO grades (grade, teacher_name, student_id, module_name,
+-                academic_year, semester) VALUES (?, ?, ?, ?, ?, ?)''', (grade, teacher, *key))
+-        exists = conn.execute('''SELECT 1 FROM absences WHERE student_id = ?
+-            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
+-        if exists:
+-            conn.execute('''UPDATE absences SET count = ? WHERE student_id = ? AND module_name = ?
+-                AND academic_year = ? AND semester = ?''', (absences, *key))
+-        else:
+-            conn.execute('''INSERT INTO absences (count, student_id, module_name, academic_year,
+-                semester) VALUES (?, ?, ?, ?, ?)''', (absences, *key))
+-    log_event(g.user['id'], 'STUDENT_RECORD_UPDATED', True,
+-              f'Student {student_id}; {module}; {year}; S{semester}')
+-
+-
+-@app.route('/faculty_dashboard', methods=['GET', 'POST'])
+-@roles_required('faculty')
+-def faculty_dashboard():
+-    if request.method == 'POST':
+-        save_academic_record()
+-        flash('Assigned record updated successfully.')
+-        return redirect(url_for('faculty_dashboard'))
+-    with connect_db() as conn:
+-        assignments = conn.execute('''SELECT f.student_id, u.name, f.module_name,
+-            f.academic_year, f.semester FROM faculty_assignments f
+-            JOIN users u ON u.id = f.student_id AND u.role = 'student'
+-            WHERE f.faculty_id = ? ORDER BY u.name, f.module_name''', (g.user['id'],)).fetchall()
+-    records = {sid: read_records(sid) for sid in {row[0] for row in assignments}}
+-    return render_template('faculty_dashboard.html', assignments=assignments, records=records)
+-
+-
+-@app.route('/api/student_records/<int:student_id>')
+-@roles_required('student', 'faculty', 'admin')
+-def api_student_records(student_id):
+-    return jsonify(student_id=student_id, records=read_records(student_id))
+-
+-
+-if __name__ == '__main__':
+-    init_db()
+-    app.run(host='127.0.0.1', debug=False)
+-
++from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify, send_file, make_response
++import sqlite3
++import secrets
++from security_b import hash_password, authenticate, install_auth, init_auth_tables, revoke_session
++from security_d import install_csrf, validate_academic_record
++from flask import abort, g
++from pathlib import Path
++from security_c import (install_rbac, roles_required, connect_db,
++                        require_assignment, read_records, deny, ROLES)
++from functools import wraps
++# import pandas as pd  # Removed due to Python 3.13 compatibility issues
++import io
++import csv
++from datetime import datetime
++import json
++from fpdf import FPDF  # Using fpdf2 instead of pdfkit
++from collections import defaultdict
++import os
++from audit_logger import log_event
++
++app = Flask(__name__)
++app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
++app.config['DATABASE'] = str(Path(__file__).resolve().parent / 'school.db')
++install_auth(app)
++install_rbac(app, log_event)
++install_csrf(app)
++
++# Database initialization
++def init_db():
++    print("Initializing database...")
++    
++    # Only create database if it doesn't exist
++    database_exists = os.path.exists(app.config['DATABASE'])
++    
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Create users table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS users (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            name TEXT NOT NULL,
++            email TEXT UNIQUE NOT NULL,
++            password TEXT NOT NULL,
++            role TEXT NOT NULL
++        )
++    ''')
++    print("Created users table")
++    
++    # Create grades table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS grades (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            student_id INTEGER NOT NULL,
++            module_name TEXT NOT NULL,
++            grade REAL NOT NULL,
++            teacher_name TEXT,
++            academic_year TEXT DEFAULT '2024-2025',
++            semester TEXT DEFAULT '1',
++            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
++            FOREIGN KEY (student_id) REFERENCES users (id)
++        )
++    ''')
++    print("Created grades table")
++    
++    # Create absences table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS absences (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            student_id INTEGER NOT NULL,
++            module_name TEXT DEFAULT NULL,
++            count INTEGER DEFAULT 0,
++            total_hours INTEGER DEFAULT 0,
++            academic_year TEXT DEFAULT '2024-2025',
++            semester TEXT DEFAULT '1',
++            FOREIGN KEY (student_id) REFERENCES users (id)
++        )
++    ''')
++    print("Created absences table")
++    
++    # Create classes table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS classes (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            name TEXT NOT NULL,
++            academic_year TEXT DEFAULT '2024-2025',
++            teacher_name TEXT
++        )
++    ''')
++    print("Created classes table")
++    
++    # Create student_class table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS student_class (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            student_id INTEGER NOT NULL,
++            class_id INTEGER NOT NULL,
++            FOREIGN KEY (student_id) REFERENCES users (id),
++            FOREIGN KEY (class_id) REFERENCES classes (id)
++        )
++    ''')
++    print("Created student_class table")
++    
++    # Create risk_thresholds table
++    cursor.execute('''
++        CREATE TABLE IF NOT EXISTS risk_thresholds (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            min_grade REAL DEFAULT 10.0,
++            max_absences INTEGER DEFAULT 10,
++            risk_level TEXT DEFAULT 'medium'
++        )
++    ''')
++    print("Created risk_thresholds table")
++    
++    # Insert default risk threshold
++    cursor.execute('SELECT COUNT(*) FROM risk_thresholds')
++    if cursor.fetchone()[0] == 0:
++        cursor.execute('INSERT INTO risk_thresholds (min_grade, max_absences, risk_level) VALUES (10.0, 10, "medium")')
++        print("Inserted default risk threshold")
++    
++    cursor.execute("""
++        CREATE TABLE IF NOT EXISTS faculty_assignments (
++            faculty_id INTEGER NOT NULL REFERENCES users(id),
++            student_id INTEGER NOT NULL REFERENCES users(id),
++            module_name TEXT NOT NULL,
++            academic_year TEXT NOT NULL,
++            semester TEXT NOT NULL,
++            PRIMARY KEY (faculty_id, student_id, module_name, academic_year, semester)
++        )
++    """)
++    init_auth_tables(conn)
++    print("Database initialization completed successfully")
++    conn.commit()
++    conn.close()
++    
++    if not database_exists:
++        print("New database created. You can now add students and data.")
++    else:
++        print("Existing database loaded. Your data is preserved.")
++
++# Part C: role authority comes from the database on every request.
++login_required = roles_required('student', 'faculty', 'admin')
++admin_required = roles_required('admin')
++
++# Get risk level for a student
++def get_student_risk_level(student_id):
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get student's average grade
++    cursor.execute('''
++        SELECT AVG(grade) FROM grades WHERE student_id = ?
++    ''', (student_id,))
++    avg_grade = cursor.fetchone()[0] or 0
++    
++    # Get student's total absences across all modules
++    cursor.execute('SELECT SUM(count) FROM absences WHERE student_id = ?', (student_id,))
++    total_absences_result = cursor.fetchone()
++    total_absences = total_absences_result[0] if total_absences_result and total_absences_result[0] else 0
++    
++    # Get risk thresholds
++    cursor.execute('SELECT min_grade, max_absences FROM risk_thresholds LIMIT 1')
++    threshold = cursor.fetchone()
++    min_grade, max_absences = threshold if threshold else (10.0, 10)
++    
++    conn.close()
++    
++    # Calculate risk level
++    if avg_grade < min_grade and total_absences > max_absences:
++        return 'high'
++    elif avg_grade < min_grade or total_absences > max_absences:
++        return 'medium'
++    else:
++        return 'low'
++
++# Get student ranking
++def get_student_ranking(student_id):
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get all students with their average grades
++    cursor.execute('''
++        SELECT u.id, u.name, AVG(g.grade) as avg_grade
++        FROM users u
++        LEFT JOIN grades g ON u.id = g.student_id
++        WHERE u.role = 'student'
++        GROUP BY u.id, u.name
++        ORDER BY avg_grade DESC
++    ''')
++    
++    students = cursor.fetchall()
++    conn.close()
++    
++    # Find student's position
++    for i, (sid, name, avg_grade) in enumerate(students, 1):
++        if sid == student_id:
++            return i, len(students), avg_grade or 0
++    
++    return None, len(students), 0
++
++# Get student performance evolution over semesters
++def get_student_evolution(student_id):
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get student's grades across semesters
++    cursor.execute('''
++        SELECT academic_year, semester, AVG(grade) as avg_grade,
++               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
++               COUNT(*) as total
++        FROM grades
++        WHERE student_id = ?
++        GROUP BY academic_year, semester
++        ORDER BY academic_year, semester
++    ''', (student_id,))
++    
++    evolution_data = cursor.fetchall()
++    conn.close()
++    
++    # Process data for visualization
++    result = []
++    for year, semester, avg_grade, passed, total in evolution_data:
++        success_rate = (passed / total * 100) if total > 0 else 0
++        result.append({
++            'period': f"{year} S{semester}",
++            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
++            'success_rate': round(success_rate, 1)
++        })
++    
++    return result
++
++# Routes
++@app.route('/')
++def index():
++    return redirect(url_for('login'))
++
++@app.route('/login', methods=['GET', 'POST'])
++def login():
++    if request.method == 'POST':
++        email = request.form.get('email', '').strip()
++        password = request.form.get('password', '')
++        if not email or len(email) > 254 or not password or len(password) > 1024:
++            log_event(user_id=None, action='LOGIN', success=False, details='Invalid login input')
++            flash('Invalid username or password')
++            return render_template('login.html'), 401
++        user, locked = authenticate(email, password)
++        if user:
++            log_event(
++                user_id=user[0],
++                action='LOGIN',
++                success=True,
++                details=f'{user[3]} login successful'
++            )
++            return redirect(url_for({'student': 'student_dashboard', 'faculty': 'faculty_dashboard', 'admin': 'admin_dashboard'}[user[3]]))
++        else:
++            log_event(
++                user_id=email,
++                action='LOGIN',
++                success=False,
++                details='Invalid login credentials'
++            )
++            flash('Too many failed attempts. Try again in 15 minutes.' if locked else 'Invalid username or password')
++            return render_template('login.html'), 429 if locked else 401
++    
++    return render_template('login.html')
++
++@app.route('/register', methods=['GET', 'POST'])
++def register():
++    if request.method == 'POST':
++        name = request.form['name']
++        email = request.form['email']
++        password = request.form['password']
++        if not 12 <= len(password) <= 1024:
++            flash('Use a password between 12 and 1024 characters.')
++            return render_template('register.html'), 400
++        
++        conn = sqlite3.connect(app.config['DATABASE'])
++        cursor = conn.cursor()
++        
++        # Check if email already exists
++        cursor.execute('SELECT id FROM users WHERE email = ?', (email,))
++        if cursor.fetchone():
++            flash('Email already registered')
++            conn.close()
++            return render_template('register.html')
++        
++        # Insert new user
++        hashed_password = hash_password(password)
++        cursor.execute('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)', 
++                      (name, email, hashed_password, 'student'))
++        
++        # Create default absence record for new student
++        student_id = cursor.lastrowid
++        
++        conn.commit()
++        conn.close()
++        
++        log_event(
++            user_id=student_id,
++            action='STUDENT_REGISTERED',
++            success=True,
++            details='New student account registered'
++        )
++        
++        flash('Registration successful! Please login.')
++        return redirect(url_for('login'))
++    
++    return render_template('register.html')
++
++@app.route('/admin_dashboard', methods=['GET', 'POST'])
++@admin_required
++def admin_dashboard():
++    if request.method == 'POST':
++        save_academic_record()
++        flash('Student data updated successfully!')
++        return redirect(url_for('admin_dashboard'))
++
++    # Get filter parameters
++    academic_year = request.args.get('academic_year', '2024-2025')
++    module_filter = request.args.get('module', '')
++    teacher_filter = request.args.get('teacher', '')
++    risk_filter = request.args.get('risk', '')
++    semester_filter = request.args.get('semester', '')
++    
++    # Get all students with their grades and absences
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Build query with filters
++    query = '''
++        SELECT u.id, u.name, u.email, 
++               g.module_name,
++               g.grade,
++               COALESCE(a.count, 0) as absences,
++               g.teacher_name,
++               g.academic_year,
++               g.semester
++        FROM users u
++        LEFT JOIN grades g ON u.id = g.student_id
++        LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
++                                AND g.academic_year = a.academic_year AND g.semester = a.semester)
++        WHERE u.role = 'student'
++    '''
++    
++    params = []
++    if academic_year:
++        query += ' AND (g.academic_year = ? OR g.academic_year IS NULL)'
++        params.append(academic_year)
++    if module_filter:
++        query += ' AND g.module_name LIKE ?'
++        params.append(f'%{module_filter}%')
++    if teacher_filter:
++        query += ' AND g.teacher_name LIKE ?'
++        params.append(f'%{teacher_filter}%')
++    if semester_filter:
++        query += ' AND g.semester = ?'
++        params.append(semester_filter)
++    
++    query += ' ORDER BY u.name'
++    
++    try:
++        cursor.execute(query, params)
++        students_data = cursor.fetchall()
++        
++        # Get unique values for filters
++        cursor.execute('SELECT DISTINCT academic_year FROM grades WHERE academic_year IS NOT NULL')
++        academic_years = [row[0] for row in cursor.fetchall()]
++        
++        cursor.execute('SELECT DISTINCT module_name FROM grades WHERE module_name IS NOT NULL')
++        modules = [row[0] for row in cursor.fetchall()]
++        
++        cursor.execute('SELECT DISTINCT teacher_name FROM grades WHERE teacher_name IS NOT NULL')
++        teachers = [row[0] for row in cursor.fetchall()]
++        
++        cursor.execute('SELECT DISTINCT semester FROM grades WHERE semester IS NOT NULL')
++        semesters = [row[0] for row in cursor.fetchall()]
++        
++        # Process data to group by student
++        students = {}
++        for row in students_data:
++            if len(row) < 9:  # Skip incomplete rows
++                continue
++                
++            student_id, name, email, module_name, grade, absences, teacher_name, year, semester = row
++            
++            if student_id not in students:
++                students[student_id] = {
++                    'id': student_id,
++                    'name': name,
++                    'email': email,
++                    'absences': absences,
++                    'modules': [],
++                    'risk_level': get_student_risk_level(student_id),
++                    'avg_grade': 0,
++                    'total_modules': 0
++                }
++            
++            if module_name:  # Only add if module name exists
++                students[student_id]['modules'].append({
++                    'name': module_name,
++                    'grade': grade,
++                    'status': 'Admis' if grade >= 10 else 'Non Admis',
++                    'teacher': teacher_name,
++                    'year': year,
++                    'semester': semester,
++                    'absences': absences
++                })
++                students[student_id]['total_modules'] += 1
++                students[student_id]['avg_grade'] += grade
++        
++        # Calculate average grades
++        for student in students.values():
++            if student['total_modules'] > 0:
++                student['avg_grade'] = student['avg_grade'] / student['total_modules']
++        
++        # Apply risk filter
++        if risk_filter:
++            students = {k: v for k, v in students.items() if v['risk_level'] == risk_filter}
++    except Exception as e:
++        flash(f'Error: {str(e)}')
++        students = {}
++        academic_years = []
++        modules = []
++        teachers = []
++        semesters = []
++    
++    conn.close()
++    
++    return render_template('admin_dashboard.html', 
++                         students=students.values(),
++                         academic_years=academic_years,
++                         modules=modules,
++                         teachers=teachers,
++                         semesters=semesters,
++                         current_filters={
++                             'academic_year': academic_year,
++                             'module': module_filter,
++                             'teacher': teacher_filter,
++                             'risk': risk_filter,
++                             'semester': semester_filter
++                         })
++
++@app.route('/student_dashboard')
++@roles_required('student')
++def student_dashboard():    
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get student's grades with absences for each module
++    cursor.execute('''
++        SELECT g.module_name, g.grade, g.teacher_name, g.academic_year, g.semester,
++               COALESCE(a.count, 0) as absences
++        FROM grades g
++        LEFT JOIN absences a ON (g.student_id = a.student_id AND g.module_name = a.module_name 
++                                AND g.academic_year = a.academic_year AND g.semester = a.semester)
++        WHERE g.student_id = ? 
++        ORDER BY g.academic_year, g.semester, g.module_name
++    ''', (session['user_id'],))
++    grades = cursor.fetchall()
++    
++    conn.close()
++    
++    # Process grades with status
++    processed_grades = []
++    total_absences = 0
++    
++    for module_name, grade, teacher_name, academic_year, semester, module_absences in grades:
++        processed_grades.append({
++            'module': module_name,
++            'grade': grade,
++            'status': 'Admis' if grade >= 10 else 'Non Admis',
++            'teacher': teacher_name,
++            'year': academic_year,
++            'semester': semester,
++            'absences': module_absences
++        })
++        total_absences += module_absences
++    
++    # Get risk level and ranking
++    risk_level = get_student_risk_level(session['user_id'])
++    ranking, total_students, avg_grade = get_student_ranking(session['user_id'])
++    
++    # Get performance evolution
++    evolution_data = get_student_evolution(session['user_id'])
++    
++    return render_template('student_dashboard.html', 
++                         grades=processed_grades, 
++                         total_absences=total_absences,
++                         name=session['name'],
++                         risk_level=risk_level,
++                         ranking=ranking,
++                         total_students=total_students,
++                         avg_grade=avg_grade,
++                         evolution_data=evolution_data)
++
++@app.route('/analytics')
++@admin_required
++def analytics():
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get overall statistics
++    cursor.execute('SELECT COUNT(*) FROM users WHERE role = "student"')
++    total_students = cursor.fetchone()[0]
++    
++    cursor.execute('SELECT AVG(grade) FROM grades')
++    overall_avg = cursor.fetchone()[0] or 0
++    
++    cursor.execute('SELECT COUNT(*) FROM grades WHERE grade < 10')
++    failed_modules = cursor.fetchone()[0]
++    
++    cursor.execute('SELECT COUNT(*) FROM grades')
++    total_modules = cursor.fetchone()[0]
++    
++    # Get students at risk (with only unique student names and total absences across all modules)
++    cursor.execute('''
++        SELECT u.name, AVG(g.grade) as avg_grade,
++        (SELECT SUM(count) FROM absences WHERE student_id = u.id) as absences
++        FROM users u
++        LEFT JOIN grades g ON u.id = g.student_id
++        WHERE u.role = 'student'
++        GROUP BY u.id, u.name
++        HAVING avg_grade < 10 OR absences > 10
++    ''')
++    at_risk_students = cursor.fetchall()
++    
++    # Get module performance
++    cursor.execute('''
++        SELECT module_name, AVG(grade) as avg_grade, COUNT(*) as student_count
++        FROM grades
++        GROUP BY module_name
++        ORDER BY avg_grade DESC
++    ''')
++    module_performance = cursor.fetchall()
++    
++    # Get performance evolution by semester
++    cursor.execute('''
++        SELECT academic_year, semester, 
++               AVG(grade) as avg_grade,
++               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
++               COUNT(*) as total
++        FROM grades
++        GROUP BY academic_year, semester
++        ORDER BY academic_year, semester
++    ''')
++    
++    performance_evolution = []
++    for year, semester, avg_grade, passed, total in cursor.fetchall():
++        success_rate = (passed / total * 100) if total > 0 else 0
++        performance_evolution.append({
++            'period': f"{year} S{semester}",
++            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
++            'success_rate': round(success_rate, 1)
++        })
++    
++    conn.close()
++    
++    return render_template('analytics.html',
++                         total_students=total_students,
++                         overall_avg=overall_avg,
++                         failed_modules=failed_modules,
++                         total_modules=total_modules,
++                         at_risk_students=at_risk_students,
++                         module_performance=module_performance,
++                         performance_evolution=performance_evolution)
++
++@app.route('/export_data')
++@admin_required
++def export_data():
++    format_type = request.args.get('format', 'csv')
++    
++    conn = sqlite3.connect(app.config['DATABASE'])
++    
++    if format_type == 'excel':
++        # Create Excel file with simplified pandas approach
++        query = '''
++            SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
++                   g.academic_year, g.semester, 
++                   COALESCE(a.count, 0) as absences
++            FROM users u
++            LEFT JOIN grades g ON u.id = g.student_id
++            LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
++                                    AND g.academic_year = a.academic_year AND g.semester = a.semester)
++            WHERE u.role = 'student'
++            ORDER BY u.name, g.academic_year, g.semester, g.module_name
++        '''
++        
++        try:
++            # Get data using cursor instead of pandas
++            cursor = conn.cursor()
++            cursor.execute(query)
++            data = cursor.fetchall()
++            
++            # Process data manually
++            processed_data = []
++            for row in data:
++                grade = row[3]
++                status = 'Admis' if grade and grade >= 10 else 'Non Admis' if grade is not None else 'N/A'
++                processed_row = [
++                    row[0],  # Student Name
++                    row[1],  # Email
++                    row[2] or 'N/A',  # Module
++                    f"{grade:.2f}" if grade is not None else 'N/A',  # Grade
++                    row[4] or 'N/A',  # Teacher
++                    row[5] or 'N/A',  # Academic Year
++                    row[6] or 'N/A',  # Semester
++                    str(row[7]),  # Absences
++                    status  # Status
++                ]
++                processed_data.append(processed_row)
++            
++            # Calculate summary data
++            students = set([row[0] for row in data])
++            total_students = len(students)
++            grades = [row[3] for row in data if row[3] is not None]
++            avg_grade = sum(grades) / len(grades) if grades else 0
++            passed = len([g for g in grades if g >= 10])
++            failed = len(grades) - passed
++            success_rate = (passed / len(grades) * 100) if grades else 0
++            
++            # Create Excel file using openpyxl directly
++            from openpyxl import Workbook
++            wb = Workbook()
++            
++            # Student Data sheet
++            ws1 = wb.active
++            ws1.title = "Student Data"
++            headers = ['Student Name', 'Email', 'Module', 'Grade', 'Teacher', 
++                      'Academic Year', 'Semester', 'Absences', 'Status']
++            ws1.append(headers)
++            
++            for row in processed_data:
++                ws1.append(row)
++            
++            # Summary sheet
++            ws2 = wb.create_sheet("Summary")
++            summary_headers = ['Metric', 'Value']
++            ws2.append(summary_headers)
++            ws2.append(['Total Students', total_students])
++            ws2.append(['Overall Average', f"{avg_grade:.2f}/20"])
++            ws2.append(['Success Rate', f"{success_rate:.1f}%"])
++            ws2.append(['Failed Modules', failed])
++            
++            # Save to memory
++            output = io.BytesIO()
++            wb.save(output)
++            output.seek(0)
++            conn.close()
++            
++            # Send as Excel file
++            return send_file(
++                output,
++                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
++                as_attachment=True,
++                download_name=f'student_data_{datetime.now().strftime("%Y%m%d")}.xlsx'
++            )
++            
++        except Exception as e:
++            conn.close()
++            return f"Error generating export file: {str(e)}", 500
++    
++    elif format_type == 'pdf':
++        try:
++            # Create PDF report using FPDF (no external dependencies)
++            cursor = conn.cursor()
++            
++            # Get student data with proper join between grades and absences
++            cursor.execute('''
++                SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
++                       g.academic_year, g.semester, 
++                       COALESCE(a.count, 0) as absences
++                FROM users u
++                LEFT JOIN grades g ON u.id = g.student_id
++                LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
++                                        AND g.academic_year = a.academic_year AND g.semester = a.semester)
++                WHERE u.role = 'student'
++                ORDER BY u.name, g.academic_year, g.semester, g.module_name
++            ''')
++            student_data = cursor.fetchall()
++            
++            # Get overall statistics
++            cursor.execute('SELECT COUNT(*) FROM users WHERE role = "student"')
++            total_students = cursor.fetchone()[0]
++            
++            cursor.execute('SELECT AVG(grade) FROM grades')
++            overall_avg = cursor.fetchone()[0] or 0
++            
++            cursor.execute('SELECT COUNT(*) FROM grades WHERE grade < 10')
++            failed_modules = cursor.fetchone()[0]
++            
++            cursor.execute('SELECT COUNT(*) FROM grades')
++            total_modules = cursor.fetchone()[0]
++            
++            success_rate = ((total_modules - failed_modules) / total_modules * 100) if total_modules > 0 else 0
++            
++            # Get at-risk students for the report
++            cursor.execute('''
++                SELECT u.name, AVG(g.grade) as avg_grade,
++                (SELECT SUM(count) FROM absences WHERE student_id = u.id) as absences
++                FROM users u
++                LEFT JOIN grades g ON u.id = g.student_id
++                WHERE u.role = 'student'
++                GROUP BY u.id, u.name
++                HAVING avg_grade < 10 OR absences > 10
++            ''')
++            at_risk_students = cursor.fetchall()
++            
++            # Get module performance
++            cursor.execute('''
++                SELECT module_name, AVG(grade) as avg_grade, COUNT(*) as student_count
++                FROM grades
++                GROUP BY module_name
++                ORDER BY avg_grade DESC
++            ''')
++            module_performance = cursor.fetchall()
++            
++            conn.close()
++            
++            # Create PDF using FPDF
++            class PDF(FPDF):
++                def header(self):
++                    # Logo - if you have one
++                    # self.image('logo.png', 10, 8, 33)
++                    self.set_font('Arial', 'B', 15)
++                    self.cell(0, 10, 'School Management System - Performance Report', 0, 1, 'C')
++                    self.set_font('Arial', 'I', 10)
++                    self.cell(0, 10, f'Generated on {datetime.now().strftime("%d/%m/%Y")}', 0, 1, 'C')
++                    self.ln(5)
++                
++                def footer(self):
++                    self.set_y(-15)
++                    self.set_font('Arial', 'I', 8)
++                    self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
++                
++                def section_title(self, title):
++                    self.set_font('Arial', 'B', 12)
++                    self.set_fill_color(100, 149, 237)  # Cornflower blue
++                    self.cell(0, 10, title, 0, 1, 'L', True)
++                    self.ln(5)
++                
++                def table_header(self, headers):
++                    self.set_font('Arial', 'B', 10)
++                    self.set_fill_color(200, 220, 255)
++                    
++                    # Calculate column widths based on content
++                    col_widths = []
++                    total_width = self.w - 20  # Page width minus margins
++                    
++                    # Simple algorithm - divide equally for now
++                    col_width = total_width / len(headers)
++                    
++                    for header in headers:
++                        self.cell(col_width, 7, header, 1, 0, 'C', True)
++                    self.ln()
++                
++                def table_row(self, data, col_widths=None):
++                    self.set_font('Arial', '', 9)
++                    
++                    if not col_widths:
++                        # Use equal width for columns
++                        col_width = (self.w - 20) / len(data)
++                        col_widths = [col_width] * len(data)
++                    
++                    for i, item in enumerate(data):
++                        # Convert any non-string data
++                        if item is None:
++                            item = 'N/A'
++                        elif not isinstance(item, str):
++                            item = str(item)
++                        
++                        # Make sure cell doesn't overflow to next page
++                        if self.get_y() + 7 > self.page_break_trigger:
++                            self.add_page()
++                        
++                        self.cell(col_widths[i], 7, item, 1, 0, 'L')
++                    self.ln()
++            
++            # Initialize PDF
++            pdf = PDF()
++            pdf.set_auto_page_break(True, margin=15)
++            pdf.add_page()
++            
++            # Summary section
++            pdf.section_title('Performance Summary')
++            pdf.set_font('Arial', '', 10)
++            pdf.cell(40, 10, f'Total Students: {total_students}', 0, 0)
++            pdf.cell(60, 10, f'Overall Average: {overall_avg:.2f}/20', 0, 0)
++            pdf.cell(50, 10, f'Success Rate: {success_rate:.1f}%', 0, 0)
++            pdf.cell(40, 10, f'Failed Modules: {failed_modules}/{total_modules}', 0, 1)
++            pdf.ln(5)
++            
++            # Students at Risk section
++            if at_risk_students:
++                pdf.add_page()
++                pdf.section_title('Students at Risk')
++                
++                # Table header
++                headers = ['Student Name', 'Average Grade', 'Absences', 'Risk Level', 'Recommendations']
++                pdf.table_header(headers)
++                
++                # Table data
++                for name, avg_grade, absences in at_risk_students:
++                    risk_level = 'High' if (avg_grade or 0) < 10 and absences > 10 else 'Medium'
++                    recommendation = "Weekly tutoring + checks" if risk_level == "High" else "Study groups + practice"
++                    pdf.table_row([name, f"{avg_grade:.2f}/20", str(absences), risk_level, recommendation])
++                pdf.ln(10)
++            
++            # Module Performance section
++            if module_performance:
++                pdf.add_page()
++                pdf.section_title('Module Performance')
++                
++                # Table header
++                headers = ['Module', 'Average Grade', 'Students', 'Success Rate']
++                pdf.table_header(headers)
++                
++                # Table data
++                for module_name, avg_grade, student_count in module_performance:
++                    module_success = (avg_grade / 20 * 100) if avg_grade else 0
++                    pdf.table_row([
++                        module_name, 
++                        f"{avg_grade:.2f}/20", 
++                        str(student_count), 
++                        f"{module_success:.1f}%"
++                    ])
++                pdf.ln(10)
++            
++            # Student Performance Data section
++            pdf.add_page()
++            pdf.section_title('Student Performance Data')
++            
++            # Limit columns to fit on page - show most important ones
++            headers = ['Name', 'Email', 'Module', 'Grade', 'Teacher', 'Absences']
++            pdf.table_header(headers)
++            
++            # Table data (limited to key columns)
++            for student in student_data:
++                pdf.table_row([
++                    student[0],    # name
++                    student[1],    # email
++                    student[2] or 'N/A',   # module
++                    f"{student[3]:.2f}" if student[3] else 'N/A',  # grade
++                    student[4] or 'N/A',   # teacher
++                    str(student[7] or '0')  # absences
++                ])
++            
++            # Get PDF as bytes
++            pdf_payload = pdf.output()
++            pdf_bytes = pdf_payload.encode('latin1') if isinstance(pdf_payload, str) else bytes(pdf_payload)
++            
++            # Return PDF file
++            return send_file(
++                io.BytesIO(pdf_bytes),
++                mimetype='application/pdf',
++                as_attachment=True,
++                download_name=f'student_report_{datetime.now().strftime("%Y%m%d")}.pdf'
++            )
++            
++        except Exception as e:
++            return f"Error generating report: {str(e)}", 500
++    
++    else:  # CSV
++        cursor = conn.cursor()
++        cursor.execute('''
++            SELECT u.name, u.email, g.module_name, g.grade, g.teacher_name, 
++                   g.academic_year, g.semester, 
++                   COALESCE(a.count, 0) as absences
++            FROM users u
++            LEFT JOIN grades g ON u.id = g.student_id
++            LEFT JOIN absences a ON (u.id = a.student_id AND g.module_name = a.module_name 
++                                    AND g.academic_year = a.academic_year AND g.semester = a.semester)
++            WHERE u.role = 'student'
++            ORDER BY u.name, g.academic_year, g.semester, g.module_name
++        ''')
++        
++        data = cursor.fetchall()
++        conn.close()
++        
++        # Create CSV in memory with improved formatting
++        output = io.StringIO()
++        writer = csv.writer(output)
++        writer.writerow(['Name', 'Email', 'Module', 'Grade', 'Teacher', 'Academic Year', 'Semester', 'Absences', 'Status'])
++        
++        # Add status column and format grades
++        formatted_data = []
++        for row in data:
++            # Calculate status
++            grade = row[3]
++            status = 'Admis' if grade and grade >= 10 else 'Non Admis' if grade is not None else 'N/A'
++            
++            # Format grade to 2 decimal places if not None
++            formatted_grade = f"{grade:.2f}" if grade is not None else 'N/A'
++            
++            # Create new row with formatted data
++            new_row = [
++                row[0],                    # Name
++                row[1],                    # Email
++                row[2] or 'N/A',           # Module
++                formatted_grade,           # Grade
++                row[4] or 'N/A',           # Teacher
++                row[5] or 'N/A',           # Academic Year
++                row[6] or 'N/A',           # Semester
++                str(row[7]),               # Absences
++                status                     # Status
++            ]
++            formatted_data.append(new_row)
++        
++        # Write the formatted data
++        writer.writerows(formatted_data)
++        
++        # Add summary data
++        writer.writerow([])
++        writer.writerow(['SUMMARY'])
++        
++        # Calculate summary metrics
++        students = set([row[0] for row in data])
++        total_students = len(students)
++        grades = [row[3] for row in data if row[3] is not None]
++        avg_grade = sum(grades) / len(grades) if grades else 0
++        passed = len([g for g in grades if g >= 10])
++        failed = len(grades) - passed
++        success_rate = (passed / len(grades) * 100) if grades else 0
++        
++        # Write summary rows
++        writer.writerow(['Total Students', total_students])
++        writer.writerow(['Overall Average', f"{avg_grade:.2f}/20"])
++        writer.writerow(['Success Rate', f"{success_rate:.1f}%"])
++        writer.writerow(['Failed Modules', failed])
++        
++        output.seek(0)
++        
++        return send_file(
++            io.BytesIO(output.getvalue().encode('utf-8')),
++            mimetype='text/csv',
++            as_attachment=True,
++            download_name=f'student_data_{datetime.now().strftime("%Y%m%d")}.csv'
++        )
++
++@app.route('/api/student_risk/<int:student_id>')
++@roles_required('student', 'admin')
++def api_student_risk(student_id):
++    if g.user['role'] == 'student' and student_id != g.user['id']:
++        deny(403, 'Students may only read their own risk assessment.')
++    with connect_db() as conn:
++        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
++            abort(404)
++    risk_level = get_student_risk_level(student_id)
++    ranking, total_students, avg_grade = get_student_ranking(student_id)
++    evolution_data = get_student_evolution(student_id)
++    
++    return jsonify({
++        'risk_level': risk_level,
++        'ranking': ranking,
++        'total_students': total_students,
++        'avg_grade': avg_grade,
++        'evolution_data': evolution_data
++    })
++
++@app.route('/api/performance_evolution')
++@admin_required
++def api_performance_evolution():
++    conn = sqlite3.connect(app.config['DATABASE'])
++    cursor = conn.cursor()
++    
++    # Get performance evolution by semester
++    cursor.execute('''
++        SELECT academic_year, semester, 
++               AVG(grade) as avg_grade,
++               COUNT(CASE WHEN grade >= 10 THEN 1 END) as passed,
++               COUNT(*) as total
++        FROM grades
++        GROUP BY academic_year, semester
++        ORDER BY academic_year, semester
++    ''')
++    
++    performance_data = cursor.fetchall()
++    conn.close()
++    
++    result = []
++    for year, semester, avg_grade, passed, total in performance_data:
++        success_rate = (passed / total * 100) if total > 0 else 0
++        result.append({
++            'period': f"{year} S{semester}",
++            'avg_grade': round(avg_grade, 2) if avg_grade else 0,
++            'success_rate': round(success_rate, 1)
++        })
++    
++    return jsonify(result)
++
++@app.route('/logout', methods=['POST'])
++def logout():
++    user_id = session.get('user_id')
++    revoke_session()
++    log_event(user_id=user_id, action='LOGOUT', success=True, details='Server session revoked')
++    return redirect(url_for('login'))
++
++def save_academic_record():
++    try:
++        student_id, module, grade, absences, teacher, year, semester = validate_academic_record(request.form)
++    except ValueError as error:
++        abort(400, description=str(error))
++    with connect_db() as conn:
++        # Lock before checking assignments so revocation cannot race this write.
++        conn.execute('BEGIN IMMEDIATE')
++        require_assignment(conn, student_id, module, year, semester)
++        if not conn.execute("SELECT 1 FROM users WHERE id = ? AND role = 'student'", (student_id,)).fetchone():
++            abort(400, description='Choose an existing student.')
++        if g.user['role'] == 'faculty':
++            teacher = g.user['name']
++        key = (student_id, module, year, semester)
++        exists = conn.execute('''SELECT 1 FROM grades WHERE student_id = ?
++            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
++        if exists:
++            conn.execute('''UPDATE grades SET grade = ?, teacher_name = ? WHERE student_id = ?
++                AND module_name = ? AND academic_year = ? AND semester = ?''', (grade, teacher, *key))
++        else:
++            conn.execute('''INSERT INTO grades (grade, teacher_name, student_id, module_name,
++                academic_year, semester) VALUES (?, ?, ?, ?, ?, ?)''', (grade, teacher, *key))
++        exists = conn.execute('''SELECT 1 FROM absences WHERE student_id = ?
++            AND module_name = ? AND academic_year = ? AND semester = ?''', key).fetchone()
++        if exists:
++            conn.execute('''UPDATE absences SET count = ? WHERE student_id = ? AND module_name = ?
++                AND academic_year = ? AND semester = ?''', (absences, *key))
++        else:
++            conn.execute('''INSERT INTO absences (count, student_id, module_name, academic_year,
++                semester) VALUES (?, ?, ?, ?, ?)''', (absences, *key))
++    log_event(g.user['id'], 'STUDENT_RECORD_UPDATED', True,
++              f'Student {student_id}; {module}; {year}; S{semester}')
++
++
++@app.route('/faculty_dashboard', methods=['GET', 'POST'])
++@roles_required('faculty')
++def faculty_dashboard():
++    if request.method == 'POST':
++        save_academic_record()
++        flash('Assigned record updated successfully.')
++        return redirect(url_for('faculty_dashboard'))
++    with connect_db() as conn:
++        assignments = conn.execute('''SELECT f.student_id, u.name, f.module_name,
++            f.academic_year, f.semester FROM faculty_assignments f
++            JOIN users u ON u.id = f.student_id AND u.role = 'student'
++            WHERE f.faculty_id = ? ORDER BY u.name, f.module_name''', (g.user['id'],)).fetchall()
++    records = {sid: read_records(sid) for sid in {row[0] for row in assignments}}
++    return render_template('faculty_dashboard.html', assignments=assignments, records=records)
++
++
++@app.route('/api/student_records/<int:student_id>')
++@roles_required('student', 'faculty', 'admin')
++def api_student_records(student_id):
++    return jsonify(student_id=student_id, records=read_records(student_id))
++
++
++if __name__ == '__main__':
++    init_db()
++    app.run(host='127.0.0.1', debug=False)
++
+--- /dev/null
++++ b/PartC/website/inspect_auth.py
+@@ -0,0 +1,16 @@
++"""Local demonstration evidence: algorithm labels and audit summaries only."""
++from contextlib import closing
++from pathlib import Path
++import sqlite3
++
++path = Path(__file__).resolve().parent / 'school.db'
++if not path.is_file():
++    raise SystemExit('Run setup_demo.py first.')
++with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True)) as conn:
++    print('Password storage (full hashes and session tokens are not printed):')
++    for email, stored in conn.execute('SELECT email, password FROM users ORDER BY id'):
++        print(email, '->', '$argon2id$' if stored.startswith('$argon2id$') else 'legacy/other')
++    print('\nRecent security events:')
++    if conn.execute("SELECT 1 FROM sqlite_master WHERE name='audit_logs'").fetchone():
++        for row in conn.execute('SELECT timestamp, user_id, action, success FROM audit_logs ORDER BY id DESC LIMIT 12'):
++            print(*row, sep=' | ')
+--- a/PartC/website/requirements.txt
++++ b/PartC/website/requirements.txt
+@@ -1,4 +1,4 @@
+ Flask==2.3.3
+ openpyxl==3.1.2
+ fpdf2==2.8.9
+-
++argon2-cffi==25.1.0
+--- /dev/null
++++ b/PartC/website/security_b.py
+@@ -0,0 +1,143 @@
++"""Part B: Argon2id, persistent login throttling, revocable sessions."""
++from contextlib import contextmanager
++from datetime import timedelta
++import hashlib
++import hmac
++import os
++import re
++import secrets
++import sqlite3
++import time
++
++from argon2 import PasswordHasher, Type
++from argon2.exceptions import VerificationError, InvalidHashError
++from flask import current_app, request, session
++
++PH = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4, type=Type.ID)
++DUMMY_HASH = PH.hash(secrets.token_urlsafe(32))
++
++
++def hash_password(password):
++    return PH.hash(password)
++
++
++def verify_password(stored, password):
++    try:
++        return PH.verify(stored, password)
++    except (VerificationError, InvalidHashError):
++        return False
++
++
++@contextmanager
++def database():
++    conn = sqlite3.connect(current_app.config['DATABASE'], timeout=15)
++    try:
++        with conn:
++            yield conn
++    finally:
++        conn.close()
++
++
++def init_auth_tables(conn):
++    conn.execute('''CREATE TABLE IF NOT EXISTS login_limits (
++        key TEXT PRIMARY KEY, failures INTEGER NOT NULL, until REAL NOT NULL)''')
++    conn.execute('''CREATE TABLE IF NOT EXISTS auth_sessions (
++        token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL,
++        password_hash TEXT NOT NULL, expires REAL NOT NULL)''')
++
++
++def digest(value):
++    return hashlib.sha256(value.encode()).hexdigest()
++
++
++def revoke_session():
++    token = session.get('auth_token')
++    if isinstance(token, str):
++        with database() as conn:
++            conn.execute('DELETE FROM auth_sessions WHERE token_hash = ?', (digest(token),))
++    session.clear()
++
++
++def authenticate(username, password):
++    """Reserve failures under an SQLite write lock, shared across workers/restarts.
++
++    Five failures per account or 30 per source address within 15 minutes.
++    Address comes from the socket, never a client-supplied forwarded header.
++    """
++    now = time.time()
++    window = current_app.config['AUTH_LOCK_SECONDS']
++    account_key = 'account:' + digest(username)
++    ip_key = 'ip:' + digest(request.remote_addr or 'unknown')
++    keys = [(account_key, current_app.config['AUTH_ACCOUNT_LIMIT']),
++            (ip_key, current_app.config['AUTH_IP_LIMIT'])]
++    with database() as conn:
++        conn.execute('BEGIN IMMEDIATE')
++        conn.execute('DELETE FROM login_limits WHERE until <= ?', (now,))
++        conn.execute('DELETE FROM auth_sessions WHERE expires <= ?', (now,))
++        for key, limit in keys:
++            state = conn.execute('SELECT failures FROM login_limits WHERE key = ?', (key,)).fetchone()
++            if state and state[0] >= limit:
++                return None, True
++        user = conn.execute('SELECT id, name, password, role FROM users WHERE email = ?',
++                            (username,)).fetchone()
++        stored = user[2] if user else DUMMY_HASH
++        legacy = bool(re.fullmatch(r'[0-9a-f]{64}', stored))
++        valid = verify_password(DUMMY_HASH if legacy else stored, password)
++        if legacy:
++            valid = hmac.compare_digest(stored, digest(password))
++        if user and valid and user[3] in {'student', 'faculty', 'admin'}:
++            # Upgrade legacy SHA-256 only after proving knowledge of the password.
++            if legacy or PH.check_needs_rehash(stored):
++                stored = hash_password(password)
++                conn.execute('UPDATE users SET password = ? WHERE id = ?', (stored, user[0]))
++            conn.execute('DELETE FROM login_limits WHERE key = ?', (account_key,))
++            # Do not reset IP failures by logging into an attacker's own account.
++            old = session.get('auth_token')
++            if isinstance(old, str):
++                conn.execute('DELETE FROM auth_sessions WHERE token_hash = ?', (digest(old),))
++            token = secrets.token_urlsafe(32)
++            conn.execute('INSERT INTO auth_sessions VALUES (?, ?, ?, ?)',
++                         (digest(token), user[0], stored, now + current_app.config['AUTH_SESSION_SECONDS']))
++            session.clear()
++            session.permanent = True
++            session.update(user_id=user[0], role=user[3], name=user[1], auth_token=token)
++            return user, False
++        locked = False
++        for key, limit in keys:
++            conn.execute('''INSERT INTO login_limits VALUES (?, 1, ?)
++                ON CONFLICT(key) DO UPDATE SET failures = failures + 1''', (key, now + window))
++            failures = conn.execute('SELECT failures FROM login_limits WHERE key = ?', (key,)).fetchone()[0]
++            locked |= failures >= limit
++        return None, locked
++
++
++def install_auth(app):
++    app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
++                      SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE') == '1',
++                      PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
++                      SESSION_REFRESH_EACH_REQUEST=False,
++                      AUTH_SESSION_SECONDS=1800, AUTH_ACCOUNT_LIMIT=5,
++                      AUTH_IP_LIMIT=30, AUTH_LOCK_SECONDS=900,
++                      MAX_CONTENT_LENGTH=1024 * 1024)
++
++    # Must precede Part C's load_identity and role enforcement.
++    @app.before_request
++    def validate_session():
++        if 'user_id' not in session:
++            return
++        token = session.get('auth_token')
++        if not isinstance(token, str):
++            session.clear()
++            return
++        with database() as conn:
++            row = conn.execute('''SELECT s.user_id FROM auth_sessions s JOIN users u
++                ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires > ?
++                AND s.password_hash = u.password''', (digest(token), time.time())).fetchone()
++        if row is None or row[0] != session.get('user_id'):
++            session.clear()
++
++    @app.after_request
++    def prevent_cached_private_pages(response):
++        response.headers['Cache-Control'] = 'no-store'
++        response.headers['Pragma'] = 'no-cache'
++        return response
+--- a/PartC/website/templates/login.html
++++ b/PartC/website/templates/login.html
+@@ -12,13 +12,13 @@
+     <form method="POST" action="{{ url_for('login') }}">
+         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+         <div class="form-group">
+-            <label for="email">Email or Admin Username</label>
+-            <input type="text" id="email" name="email" required>
++            <label for="email">Username (account email)</label>
++            <input type="text" id="email" name="email" autocomplete="username" maxlength="254" required>
+         </div>
+         
+         <div class="form-group">
+             <label for="password">Password</label>
+-            <input type="password" id="password" name="password" required>
++            <input type="password" id="password" name="password" autocomplete="current-password" maxlength="1024" required>
+         </div>
+         
+         <div class="text-center">
+--- /dev/null
++++ b/PartC/website/test_authentication.py
+@@ -0,0 +1,183 @@
++"""Integration tests with real Argon2id, SQLite and enabled CSRF."""
++from contextlib import closing, redirect_stdout
++import hashlib
++import io
++from pathlib import Path
++import sqlite3
++import tempfile
++import unittest
++from app import app, init_db
++from security_b import hash_password, verify_password
++
++class AuthenticationTests(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        cls.stored = hash_password('DemoPass123!')
++
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.original = dict(app.config)
++        self.addCleanup(self.restore)
++        app.config.update(TESTING=True, SECRET_KEY='test-only-key', DATABASE=str(Path(self.temp.name)/'test.db'))
++        with redirect_stdout(io.StringIO()):
++            init_db()
++        for uid, role in [(1, 'student'), (2, 'faculty')]:
++            self.sql('INSERT INTO users VALUES (?, ?, ?, ?, ?)', (uid, role, role+'@example.test', self.stored, role))
++        self.client = app.test_client()
++
++    def restore(self):
++        app.config.clear()
++        app.config.update(self.original)
++
++    def sql(self, query, params=()):
++        with closing(sqlite3.connect(app.config['DATABASE'])) as conn, conn:
++            return conn.execute(query, params).fetchall()
++
++    def post(self, path, data=None, client=None):
++        c = client or self.client
++        c.get('/login')
++        with c.session_transaction() as sess:
++            token = sess['_csrf_token']
++        return c.post(path, data={'csrf_token': token, **(data or {})})
++
++    def login(self, password='DemoPass123!', username='student@example.test', client=None):
++        return self.post('/login', {'email':username, 'password':password}, client)
++
++    def test_student_and_faculty_login(self):
++        for role in ['student', 'faculty']:
++            c = app.test_client()
++            r = self.login(username=role+'@example.test', client=c)
++            self.assertEqual(r.status_code, 302)
++            self.assertTrue(r.location.endswith('/'+role+'_dashboard'))
++            self.assertEqual(c.get(r.location).status_code, 200)
++
++    def test_salted_argon2id_storage(self):
++        a, b = hash_password('same password'), hash_password('same password')
++        self.assertTrue(a.startswith('$argon2id$'))
++        self.assertNotEqual(a, b)
++        self.assertTrue(verify_password(a, 'same password'))
++        self.assertFalse(verify_password(a, 'wrong'))
++        self.assertFalse(verify_password('corrupt', 'anything'))
++
++    def test_incorrect_unknown_and_sql_injection_credentials(self):
++        for username in ['student@example.test', 'missing@example.test', "' OR 1=1 --"]:
++            r = self.login('wrong', username)
++            self.assertEqual(r.status_code, 401)
++            self.assertIn(b'Invalid username or password', r.data)
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 401)
++
++    def test_account_lock_survives_new_client_and_initialization(self):
++        for i in range(5):
++            self.assertEqual(self.login('wrong').status_code, 429 if i == 4 else 401)
++        with redirect_stdout(io.StringIO()):
++            init_db()
++        self.assertEqual(self.login(client=app.test_client()).status_code, 429)
++
++    def test_expired_lock_allows_login(self):
++        for _ in range(5): self.login('wrong')
++        self.sql('UPDATE login_limits SET until = 0')
++        self.assertEqual(self.login().status_code, 302)
++
++    def test_success_resets_account_failures(self):
++        for _ in range(4): self.login('wrong')
++        self.assertEqual(self.login().status_code, 302)
++        self.post('/logout')
++        self.assertEqual(self.login('wrong').status_code, 401)
++        self.assertEqual(self.sql("SELECT failures FROM login_limits WHERE key LIKE 'account:%'")[0][0], 1)
++
++    def test_ip_limits_rotating_usernames(self):
++        app.config['AUTH_IP_LIMIT'] = 3
++        for i in range(3):
++            self.assertEqual(self.login('wrong', f'missing{i}').status_code, 429 if i == 2 else 401)
++        self.assertEqual(self.login().status_code, 429)
++
++    def test_protected_resources_require_login(self):
++        for path in ['/student_dashboard','/faculty_dashboard','/admin_dashboard','/analytics','/export_data','/api/student_risk/1','/api/performance_evolution','/api/student_records/1']:
++            with self.subTest(path=path): self.assertEqual(self.client.get(path).status_code, 401)
++        self.assertEqual(self.client.post('/faculty_dashboard').status_code, 401)
++
++    def test_logout_revokes_copied_cookie(self):
++        self.login()
++        copied = self.client.get_cookie('session').value
++        self.assertEqual(self.post('/logout').status_code, 302)
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 401)
++        c = app.test_client()
++        c.set_cookie('session', copied)
++        self.assertEqual(c.get('/student_dashboard').status_code, 401)
++        self.assertEqual(self.sql('SELECT * FROM auth_sessions'), [])
++
++    def test_expired_session_is_rejected(self):
++        self.login()
++        self.sql('UPDATE auth_sessions SET expires = 0')
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 401)
++
++    def test_password_change_invalidates_session(self):
++        self.login()
++        self.sql('UPDATE users SET password = ? WHERE id = 1', (hash_password('NewPassword123!'),))
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 401)
++
++    def test_old_cookie_without_server_session_rejected(self):
++        with self.client.session_transaction() as sess: sess.update(user_id=1, role='student')
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 401)
++
++    def test_login_rotates_session_and_csrf(self):
++        self.login()
++        self.client.get('/login')
++        with self.client.session_transaction() as sess: old_token, old_csrf = sess['auth_token'], sess['_csrf_token']
++        copied = self.client.get_cookie('session').value
++        self.login()
++        self.client.get('/login')
++        with self.client.session_transaction() as sess:
++            self.assertNotEqual(sess['auth_token'], old_token)
++            self.assertNotEqual(sess['_csrf_token'], old_csrf)
++        c = app.test_client()
++        c.set_cookie('session', copied)
++        self.assertEqual(c.get('/student_dashboard').status_code, 401)
++
++    def test_csrf_and_post_only_logout(self):
++        self.assertEqual(self.client.post('/login', data={'email':'student@example.test','password':'DemoPass123!'}).status_code, 400)
++        self.login()
++        self.assertEqual(self.client.get('/logout').status_code, 405)
++        self.assertEqual(self.client.post('/logout').status_code, 400)
++        self.assertEqual(self.client.get('/student_dashboard').status_code, 200)
++
++    def test_legacy_hash_upgraded_only_on_success(self):
++        old = hashlib.sha256(b'DemoPass123!').hexdigest()
++        self.sql('UPDATE users SET password = ? WHERE id = 1', (old,))
++        self.assertEqual(self.login('wrong').status_code, 401)
++        self.assertEqual(self.sql('SELECT password FROM users WHERE id = 1')[0][0], old)
++        self.assertEqual(self.login().status_code, 302)
++        stored = self.sql('SELECT password FROM users WHERE id = 1')[0][0]
++        self.assertTrue(stored.startswith('$argon2id$'))
++        self.assertTrue(verify_password(stored, 'DemoPass123!'))
++
++    def test_registration_argon2_and_student_role(self):
++        data = dict(name='New User', email='new@example.test', password='NewPassword123!', role='faculty')
++        self.assertEqual(self.post('/register', data).status_code, 302)
++        row = self.sql('SELECT password, role FROM users WHERE email = ?', (data['email'],))[0]
++        self.assertTrue(verify_password(row[0], data['password']))
++        self.assertTrue(row[0].startswith('$argon2id$'))
++        self.assertEqual(row[1], 'student')
++        data.update(email='weak@example.test', password='short')
++        self.assertEqual(self.post('/register', data).status_code, 400)
++
++    def test_cookies_cache_and_audit_without_secrets(self):
++        self.login('wrong')
++        r = self.login()
++        self.assertIn('HttpOnly', r.headers['Set-Cookie'])
++        self.assertIn('SameSite=Lax', r.headers['Set-Cookie'])
++        self.assertEqual(self.client.get('/student_dashboard').headers['Cache-Control'], 'no-store')
++        self.post('/logout')
++        rows = self.sql('SELECT action, success, details FROM audit_logs')
++        self.assertIn(('LOGIN', 0, 'Invalid login credentials'), rows)
++        self.assertIn(('LOGIN', 1, 'student login successful'), rows)
++        self.assertTrue(any(r[0]=='LOGOUT' for r in rows))
++        self.assertNotIn('DemoPass123!', str(rows))
++        self.assertNotIn('$argon2id$', str(rows))
++
++    def test_missing_or_oversized_login_rejected(self):
++        for data in [{}, {'email':'x','password':'a'*1025}]:
++            self.assertEqual(self.post('/login', data).status_code, 401)
++
++if __name__ == '__main__': unittest.main(verbosity=2)
+--- a/PartC/website/test_permissions.py
++++ b/PartC/website/test_permissions.py
+@@ -1,335 +1,337 @@
+-"""Part C integration tests: real login, signed sessions, real SQLite, CSRF enabled."""
+-from contextlib import redirect_stdout, redirect_stderr
+-import io
+-from pathlib import Path
+-import sqlite3
+-import tempfile
+-import unittest
+-
+-from app import app, hash_password, init_db
+-
+-
+-class PermissionTests(unittest.TestCase):
+-    def setUp(self):
+-        self.temp = tempfile.TemporaryDirectory()
+-        self.addCleanup(self.temp.cleanup)
+-        self.old_config = dict(app.config)
+-        self.addCleanup(self.restore_config)
+-        app.config.update(TESTING=True, SECRET_KEY='test-only-secret',
+-                          DATABASE=str(Path(self.temp.name) / 'school.db'))
+-        with redirect_stdout(io.StringIO()):
+-            init_db()
+-        with self.db() as conn:
+-            for uid, role in [(1, 'admin'), (2, 'faculty'), (3, 'student'), (4, 'student'),
+-                              (5, 'faculty'), (6, 'unknown')]:
+-                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?)',
+-                             (uid, f'User {uid}', f'user{uid}@example.test', hash_password('password'), role))
+-            conn.executemany('INSERT INTO faculty_assignments VALUES (?, ?, ?, ?, ?)',
+-                             [(2, 3, 'Math', '2024-2025', '1'), (5, 4, 'Physics', '2024-2025', '1')])
+-            conn.executemany('''INSERT INTO grades (student_id, module_name, grade, teacher_name,
+-                academic_year, semester) VALUES (?, ?, 12, 'Original', '2024-2025', '1')''',
+-                             [(3, 'Math'), (3, 'Private History'), (4, 'Physics')])
+-            conn.execute('''INSERT INTO absences (student_id, module_name, count, academic_year,
+-                semester) VALUES (3, 'Math', 2, '2024-2025', '1')''')
+-        self.client = app.test_client()
+-
+-    def restore_config(self):
+-        app.config.clear()
+-        app.config.update(self.old_config)
+-
+-    def db(self):
+-        # closing plus transaction avoids leaving Windows SQLite file handles open.
+-        from contextlib import contextmanager, closing
+-        @contextmanager
+-        def connection():
+-            with closing(sqlite3.connect(app.config['DATABASE'])) as conn, conn:
+-                yield conn
+-        return connection()
+-
+-    def login(self, uid):
+-        self.client.get('/login')
+-        response = self.post('/login', email=f'user{uid}@example.test', password='password')
+-        self.assertEqual(response.status_code, 302)
+-        # Login rotates the session. The destination form issues a fresh CSRF token.
+-        self.assertEqual(self.client.get(response.location).status_code, 200)
+-        return response
+-
+-    def post(self, path, **data):
+-        with self.client.session_transaction() as sess:
+-            token = sess.get('_csrf_token')
+-        return self.client.post(path, data={'csrf_token': token, **data})
+-
+-    def record(self, **overrides):
+-        return dict(student_id='3', module_name='Math', grade='18.5', absences='1',
+-                    teacher_name='Spoofed teacher', academic_year='2024-2025', semester='1', **overrides)
+-
+-    def snapshot(self):
+-        with self.db() as conn:
+-            return {table: conn.execute(f'SELECT * FROM {table} ORDER BY 1').fetchall()
+-                    for table in ('users', 'grades', 'absences', 'faculty_assignments')}
+-
+-    def reject(self, response, before, status=403):
+-        self.assertEqual(response.status_code, status)
+-        self.assertEqual(self.snapshot(), before)
+-
+-    def reject_unchanged(self, request, status=403):
+-        before = self.snapshot()
+-        self.reject(request(), before, status)
+-
+-    def test_local_cli_provisions_and_revokes_assignments(self):
+-        from manage_access import main
+-        args = ['--database', app.config['DATABASE']]
+-        assignment = ['--faculty-id', '2', '--student-id', '4', '--module', 'Physics',
+-                      '--year', '2024-2025', '--semester', '1']
+-        with redirect_stdout(io.StringIO()):
+-            main(args + ['assign'] + assignment)
+-        self.login(2)
+-        self.assertEqual(self.client.get('/api/student_records/4').status_code, 200)
+-        with redirect_stdout(io.StringIO()):
+-            main(args + ['revoke'] + assignment)
+-        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
+-
+-    def test_local_cli_rejects_student_as_faculty(self):
+-        from manage_access import main
+-        before = self.snapshot()
+-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+-            main(['--database', app.config['DATABASE'], 'assign', '--faculty-id', '3',
+-                  '--student-id', '4', '--module', 'Physics', '--year', '2024-2025', '--semester', '1'])
+-        self.assertEqual(self.snapshot(), before)
+-
+-    def test_local_cli_can_create_faculty_account(self):
+-        from manage_access import main
+-        from unittest.mock import patch
+-        with patch('manage_access.getpass', return_value='new-password'), redirect_stdout(io.StringIO()):
+-            main(['--database', app.config['DATABASE'], 'create-user', '--name', 'New Faculty',
+-                  '--email', 'newfaculty@example.test', '--role', 'faculty'])
+-        with self.db() as conn:
+-            row = conn.execute("SELECT password, role FROM users WHERE email='newfaculty@example.test'").fetchone()
+-        self.assertEqual(row, (hash_password('new-password'), 'faculty'))
+-
+-    def test_local_cli_demotion_revokes_active_session_and_assignments(self):
+-        from manage_access import main
+-        self.login(2)
+-        with redirect_stdout(io.StringIO()):
+-            main(['--database', app.config['DATABASE'], 'set-role', '--user-id', '2', '--role', 'student'])
+-        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
+-        with self.db() as conn:
+-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM faculty_assignments WHERE faculty_id=2').fetchone(), (0,))
+-
+-    def test_login_routes_by_database_role(self):
+-        for uid, target in [(1, '/admin_dashboard'), (2, '/faculty_dashboard'), (3, '/student_dashboard')]:
+-            with self.subTest(uid=uid):
+-                self.client = app.test_client()
+-                self.assertEqual(self.login(uid).location, target)
+-                self.assertEqual(self.client.get(target).status_code, 200)
+-
+-    def test_anonymous_all_protected_resources(self):
+-        for path in ['/admin_dashboard', '/faculty_dashboard', '/student_dashboard', '/analytics',
+-                     '/export_data', '/api/student_risk/3', '/api/student_records/3', '/api/performance_evolution']:
+-            with self.subTest(path=path):
+-                self.reject_unchanged(lambda: self.client.get(path), 401)
+-        for path in ['/admin_dashboard', '/faculty_dashboard']:
+-            with self.subTest(post=path):
+-                self.reject_unchanged(lambda: self.client.post(path, data=self.record()), 401)
+-
+-    def test_student_cannot_access_staff_endpoints(self):
+-        self.login(3)
+-        for path in ['/admin_dashboard', '/faculty_dashboard', '/analytics', '/api/performance_evolution',
+-                     '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
+-            with self.subTest(path=path):
+-                self.reject_unchanged(lambda: self.client.get(path))
+-        for path in ['/admin_dashboard', '/faculty_dashboard']:
+-            with self.subTest(post=path):
+-                self.reject_unchanged(lambda: self.post(path, **self.record()))
+-
+-    def test_faculty_cannot_access_admin_endpoints(self):
+-        self.login(2)
+-        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution',
+-                     '/api/student_risk/3', '/student_dashboard', '/export_data?format=csv',
+-                     '/export_data?format=excel', '/export_data?format=pdf']:
+-            with self.subTest(path=path):
+-                self.reject_unchanged(lambda: self.client.get(path))
+-        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
+-
+-    def test_student_reads_self_without_other_student_data(self):
+-        self.login(3)
+-        response = self.client.get('/api/student_records/3')
+-        self.assertEqual(response.status_code, 200)
+-        self.assertEqual({r['module'] for r in response.json['records']}, {'Math', 'Private History'})
+-        page = self.client.get('/student_dashboard?student_id=4')
+-        self.assertEqual(page.status_code, 200)
+-        self.assertNotIn(b'Physics', page.data)
+-        self.assertEqual(self.client.get('/api/student_risk/3').status_code, 200)
+-
+-    def test_student_horizontal_idor_denied(self):
+-        self.login(3)
+-        for path in ['/api/student_records/4', '/api/student_risk/4', '/api/student_records/99999']:
+-            with self.subTest(path=path):
+-                response = self.client.get(path)
+-                self.reject(response, self.snapshot())
+-                self.assertEqual(response.json['error'], 'Forbidden')
+-                self.assertNotIn(b'Physics', response.data)
+-
+-    def test_faculty_reads_only_assigned_modules(self):
+-        self.login(2)
+-        response = self.client.get('/api/student_records/3')
+-        self.assertEqual(response.status_code, 200)
+-        self.assertEqual([r['module'] for r in response.json['records']], ['Math'])
+-        page = self.client.get('/faculty_dashboard?student_id=4&faculty_id=5')
+-        self.assertEqual(page.status_code, 200)
+-        self.assertNotIn(b'Private History', page.data)
+-        self.assertNotIn(b'Physics', page.data)
+-        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
+-
+-    def test_faculty_writes_assigned_record_and_forces_teacher_identity(self):
+-        self.login(2)
+-        response = self.post('/faculty_dashboard', **self.record())
+-        self.assertEqual(response.status_code, 302)
+-        with self.db() as conn:
+-            self.assertEqual(conn.execute("SELECT grade, teacher_name FROM grades WHERE module_name='Math'").fetchone(),
+-                             (18.5, 'User 2'))
+-            self.assertEqual(conn.execute("SELECT count FROM absences WHERE module_name='Math'").fetchone(), (1,))
+-
+-    def test_each_assignment_dimension_is_enforced(self):
+-        self.login(2)
+-        for change in [dict(student_id='4'), dict(module_name='Private History'),
+-                       dict(academic_year='2025-2026'), dict(semester='2'), dict(student_id='99999')]:
+-            with self.subTest(change=change):
+-                payload = self.record()
+-                payload.update(change)
+-                before = self.snapshot()
+-                self.reject(self.post('/faculty_dashboard', **payload), before)
+-
+-    def test_second_faculty_cannot_use_first_faculty_assignment(self):
+-        self.login(5)
+-        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
+-        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'))
+-
+-    def test_new_record_for_assigned_module_can_be_created(self):
+-        self.login(2)
+-        with self.db() as conn:
+-            conn.execute("DELETE FROM grades WHERE module_name='Math'")
+-            conn.execute("DELETE FROM absences WHERE module_name='Math'")
+-        self.assertEqual(self.post('/faculty_dashboard', **self.record()).status_code, 302)
+-        self.assertEqual(len(self.client.get('/api/student_records/3').json['records']), 1)
+-
+-    def test_revoked_assignment_takes_effect_on_existing_session(self):
+-        self.login(2)
+-        with self.db() as conn:
+-            conn.execute('DELETE FROM faculty_assignments WHERE faculty_id=2')
+-        before = self.snapshot()
+-        self.reject(self.post('/faculty_dashboard', **self.record()), before)
+-        self.reject(self.client.get('/api/student_records/3'), before)
+-        self.assertNotIn(b'Math', self.client.get('/faculty_dashboard').data)
+-
+-    def test_cookie_role_forgery_does_not_elevate_student(self):
+-        self.login(3)
+-        with self.client.session_transaction() as sess:
+-            sess['role'] = 'admin'
+-            sess['name'] = 'Administrator'
+-        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'))
+-        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
+-
+-    def test_form_and_query_role_forgery_does_not_elevate(self):
+-        self.login(3)
+-        self.reject_unchanged(lambda: self.post('/faculty_dashboard?role=faculty', role='faculty', **self.record()))
+-
+-    def test_registration_always_creates_student(self):
+-        self.client.get('/register')
+-        self.assertEqual(self.post('/register?role=admin', name='New User', email='new@example.test',
+-                                   password='pass', role='faculty', user_id='1').status_code, 302)
+-        with self.db() as conn:
+-            self.assertEqual(conn.execute("SELECT role FROM users WHERE email='new@example.test'").fetchone(), ('student',))
+-
+-    def test_database_demotion_immediately_revokes_admin_session(self):
+-        self.login(1)
+-        with self.db() as conn:
+-            conn.execute("UPDATE users SET role='student' WHERE id=1")
+-        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
+-
+-    def test_database_demotion_immediately_revokes_faculty_session(self):
+-        self.login(2)
+-        with self.db() as conn:
+-            conn.execute("UPDATE users SET role='student' WHERE id=2")
+-        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
+-
+-    def test_deleted_account_loses_existing_session(self):
+-        self.login(3)
+-        with self.db() as conn:
+-            conn.execute('DELETE FROM users WHERE id=3')
+-        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'), 401)
+-
+-    def test_unknown_database_role_fails_closed(self):
+-        self.login(2)
+-        with self.db() as conn:
+-            conn.execute("UPDATE users SET role='unknown' WHERE id=2")
+-        self.reject_unchanged(lambda: self.client.get('/faculty_dashboard'))
+-        other = app.test_client()
+-        other.get('/login')
+-        with other.session_transaction() as sess:
+-            token = sess['_csrf_token']
+-        response = other.post('/login', data=dict(email='user6@example.test', password='password', csrf_token=token))
+-        self.assertEqual(response.status_code, 200)
+-        with other.session_transaction() as sess:
+-            self.assertNotIn('user_id', sess)
+-
+-    def test_string_admin_session_and_hardcoded_admin_login_rejected(self):
+-        self.client.get('/login')
+-        response = self.post('/login', email='admin', password='admin')
+-        self.assertEqual(response.status_code, 200)
+-        with self.client.session_transaction() as sess:
+-            sess['user_id'], sess['role'] = 'admin', 'admin'
+-        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'), 401)
+-
+-    def test_denial_audit_contains_endpoint_and_actor(self):
+-        self.login(2)
+-        payload = self.record()
+-        payload['student_id'] = '4'
+-        self.assertEqual(self.post('/faculty_dashboard', **payload).status_code, 403)
+-        with self.db() as conn:
+-            row = conn.execute("SELECT user_id, success, details FROM audit_logs WHERE action='UNAUTHORIZED_ACCESS'").fetchone()
+-        self.assertEqual(row[:2], ('2', 0))
+-        self.assertIn('POST /faculty_dashboard', row[2])
+-
+-    def test_authorized_faculty_still_requires_csrf(self):
+-        self.login(2)
+-        before = self.snapshot()
+-        self.reject(self.client.post('/faculty_dashboard', data=self.record()), before, 400)
+-        self.reject(self.post('/faculty_dashboard', **{**self.record(), 'csrf_token': 'wrong'}), before, 400)
+-
+-    def test_authorized_faculty_still_requires_valid_inputs(self):
+-        self.login(2)
+-        for change in [dict(grade='99'), dict(grade='nan'), dict(absences='-1'), dict(semester='3')]:
+-            with self.subTest(change=change):
+-                before = self.snapshot()
+-                self.reject(self.post('/faculty_dashboard', **{**self.record(), **change}), before, 400)
+-
+-    def test_admin_normal_read_write_and_exports(self):
+-        self.login(1)
+-        self.assertEqual(self.post('/admin_dashboard', **self.record()).status_code, 302)
+-        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution', '/api/student_risk/3',
+-                     '/api/student_records/4', '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
+-            with self.subTest(path=path):
+-                self.assertEqual(self.client.get(path).status_code, 200)
+-
+-    def test_logout_invalidates_access_and_get_logout_is_disabled(self):
+-        self.login(3)
+-        self.assertEqual(self.client.get('/logout').status_code, 405)
+-        self.assertEqual(self.post('/logout').status_code, 302)
+-        self.reject_unchanged(lambda: self.client.get('/student_dashboard'), 401)
+-
+-    def test_missing_student_admin_returns_404(self):
+-        self.login(1)
+-        self.assertEqual(self.client.get('/api/student_records/999').status_code, 404)
+-        self.assertEqual(self.client.get('/api/student_risk/999').status_code, 404)
+-
+-    def test_additive_migration_is_idempotent(self):
+-        before = self.snapshot()
+-        with redirect_stdout(io.StringIO()):
+-            init_db()
+-            init_db()
+-        self.assertEqual(self.snapshot(), before)
+-
+-
+-if __name__ == '__main__':
+-    unittest.main(verbosity=2)
++"""Part C integration tests: real login, signed sessions, real SQLite, CSRF enabled."""
++from contextlib import redirect_stdout, redirect_stderr
++import io
++from pathlib import Path
++import sqlite3
++import tempfile
++import unittest
++
++from app import app, hash_password, init_db
++
++
++class PermissionTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        self.old_config = dict(app.config)
++        self.addCleanup(self.restore_config)
++        app.config.update(TESTING=True, SECRET_KEY='test-only-secret',
++                          DATABASE=str(Path(self.temp.name) / 'school.db'))
++        with redirect_stdout(io.StringIO()):
++            init_db()
++        with self.db() as conn:
++            for uid, role in [(1, 'admin'), (2, 'faculty'), (3, 'student'), (4, 'student'),
++                              (5, 'faculty'), (6, 'unknown')]:
++                conn.execute('INSERT INTO users VALUES (?, ?, ?, ?, ?)',
++                             (uid, f'User {uid}', f'user{uid}@example.test', hash_password('password'), role))
++            conn.executemany('INSERT INTO faculty_assignments VALUES (?, ?, ?, ?, ?)',
++                             [(2, 3, 'Math', '2024-2025', '1'), (5, 4, 'Physics', '2024-2025', '1')])
++            conn.executemany('''INSERT INTO grades (student_id, module_name, grade, teacher_name,
++                academic_year, semester) VALUES (?, ?, 12, 'Original', '2024-2025', '1')''',
++                             [(3, 'Math'), (3, 'Private History'), (4, 'Physics')])
++            conn.execute('''INSERT INTO absences (student_id, module_name, count, academic_year,
++                semester) VALUES (3, 'Math', 2, '2024-2025', '1')''')
++        self.client = app.test_client()
++
++    def restore_config(self):
++        app.config.clear()
++        app.config.update(self.old_config)
++
++    def db(self):
++        # closing plus transaction avoids leaving Windows SQLite file handles open.
++        from contextlib import contextmanager, closing
++        @contextmanager
++        def connection():
++            with closing(sqlite3.connect(app.config['DATABASE'])) as conn, conn:
++                yield conn
++        return connection()
++
++    def login(self, uid):
++        self.client.get('/login')
++        response = self.post('/login', email=f'user{uid}@example.test', password='password')
++        self.assertEqual(response.status_code, 302)
++        # Login rotates the session. The destination form issues a fresh CSRF token.
++        self.assertEqual(self.client.get(response.location).status_code, 200)
++        return response
++
++    def post(self, path, **data):
++        with self.client.session_transaction() as sess:
++            token = sess.get('_csrf_token')
++        return self.client.post(path, data={'csrf_token': token, **data})
++
++    def record(self, **overrides):
++        return dict(student_id='3', module_name='Math', grade='18.5', absences='1',
++                    teacher_name='Spoofed teacher', academic_year='2024-2025', semester='1', **overrides)
++
++    def snapshot(self):
++        with self.db() as conn:
++            return {table: conn.execute(f'SELECT * FROM {table} ORDER BY 1').fetchall()
++                    for table in ('users', 'grades', 'absences', 'faculty_assignments')}
++
++    def reject(self, response, before, status=403):
++        self.assertEqual(response.status_code, status)
++        self.assertEqual(self.snapshot(), before)
++
++    def reject_unchanged(self, request, status=403):
++        before = self.snapshot()
++        self.reject(request(), before, status)
++
++    def test_local_cli_provisions_and_revokes_assignments(self):
++        from manage_access import main
++        args = ['--database', app.config['DATABASE']]
++        assignment = ['--faculty-id', '2', '--student-id', '4', '--module', 'Physics',
++                      '--year', '2024-2025', '--semester', '1']
++        with redirect_stdout(io.StringIO()):
++            main(args + ['assign'] + assignment)
++        self.login(2)
++        self.assertEqual(self.client.get('/api/student_records/4').status_code, 200)
++        with redirect_stdout(io.StringIO()):
++            main(args + ['revoke'] + assignment)
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
++
++    def test_local_cli_rejects_student_as_faculty(self):
++        from manage_access import main
++        before = self.snapshot()
++        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
++            main(['--database', app.config['DATABASE'], 'assign', '--faculty-id', '3',
++                  '--student-id', '4', '--module', 'Physics', '--year', '2024-2025', '--semester', '1'])
++        self.assertEqual(self.snapshot(), before)
++
++    def test_local_cli_can_create_faculty_account(self):
++        from manage_access import main
++        from unittest.mock import patch
++        with patch('manage_access.getpass', return_value='new-password'), redirect_stdout(io.StringIO()):
++            main(['--database', app.config['DATABASE'], 'create-user', '--name', 'New Faculty',
++                  '--email', 'newfaculty@example.test', '--role', 'faculty'])
++        with self.db() as conn:
++            row = conn.execute("SELECT password, role FROM users WHERE email='newfaculty@example.test'").fetchone()
++        from security_b import verify_password
++        self.assertTrue(verify_password(row[0], 'new-password'))
++        self.assertEqual(row[1], 'faculty')
++
++    def test_local_cli_demotion_revokes_active_session_and_assignments(self):
++        from manage_access import main
++        self.login(2)
++        with redirect_stdout(io.StringIO()):
++            main(['--database', app.config['DATABASE'], 'set-role', '--user-id', '2', '--role', 'student'])
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++        with self.db() as conn:
++            self.assertEqual(conn.execute('SELECT COUNT(*) FROM faculty_assignments WHERE faculty_id=2').fetchone(), (0,))
++
++    def test_login_routes_by_database_role(self):
++        for uid, target in [(1, '/admin_dashboard'), (2, '/faculty_dashboard'), (3, '/student_dashboard')]:
++            with self.subTest(uid=uid):
++                self.client = app.test_client()
++                self.assertEqual(self.login(uid).location, target)
++                self.assertEqual(self.client.get(target).status_code, 200)
++
++    def test_anonymous_all_protected_resources(self):
++        for path in ['/admin_dashboard', '/faculty_dashboard', '/student_dashboard', '/analytics',
++                     '/export_data', '/api/student_risk/3', '/api/student_records/3', '/api/performance_evolution']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path), 401)
++        for path in ['/admin_dashboard', '/faculty_dashboard']:
++            with self.subTest(post=path):
++                self.reject_unchanged(lambda: self.client.post(path, data=self.record()), 401)
++
++    def test_student_cannot_access_staff_endpoints(self):
++        self.login(3)
++        for path in ['/admin_dashboard', '/faculty_dashboard', '/analytics', '/api/performance_evolution',
++                     '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path))
++        for path in ['/admin_dashboard', '/faculty_dashboard']:
++            with self.subTest(post=path):
++                self.reject_unchanged(lambda: self.post(path, **self.record()))
++
++    def test_faculty_cannot_access_admin_endpoints(self):
++        self.login(2)
++        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution',
++                     '/api/student_risk/3', '/student_dashboard', '/export_data?format=csv',
++                     '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.reject_unchanged(lambda: self.client.get(path))
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_student_reads_self_without_other_student_data(self):
++        self.login(3)
++        response = self.client.get('/api/student_records/3')
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual({r['module'] for r in response.json['records']}, {'Math', 'Private History'})
++        page = self.client.get('/student_dashboard?student_id=4')
++        self.assertEqual(page.status_code, 200)
++        self.assertNotIn(b'Physics', page.data)
++        self.assertEqual(self.client.get('/api/student_risk/3').status_code, 200)
++
++    def test_student_horizontal_idor_denied(self):
++        self.login(3)
++        for path in ['/api/student_records/4', '/api/student_risk/4', '/api/student_records/99999']:
++            with self.subTest(path=path):
++                response = self.client.get(path)
++                self.reject(response, self.snapshot())
++                self.assertEqual(response.json['error'], 'Forbidden')
++                self.assertNotIn(b'Physics', response.data)
++
++    def test_faculty_reads_only_assigned_modules(self):
++        self.login(2)
++        response = self.client.get('/api/student_records/3')
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual([r['module'] for r in response.json['records']], ['Math'])
++        page = self.client.get('/faculty_dashboard?student_id=4&faculty_id=5')
++        self.assertEqual(page.status_code, 200)
++        self.assertNotIn(b'Private History', page.data)
++        self.assertNotIn(b'Physics', page.data)
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/4'))
++
++    def test_faculty_writes_assigned_record_and_forces_teacher_identity(self):
++        self.login(2)
++        response = self.post('/faculty_dashboard', **self.record())
++        self.assertEqual(response.status_code, 302)
++        with self.db() as conn:
++            self.assertEqual(conn.execute("SELECT grade, teacher_name FROM grades WHERE module_name='Math'").fetchone(),
++                             (18.5, 'User 2'))
++            self.assertEqual(conn.execute("SELECT count FROM absences WHERE module_name='Math'").fetchone(), (1,))
++
++    def test_each_assignment_dimension_is_enforced(self):
++        self.login(2)
++        for change in [dict(student_id='4'), dict(module_name='Private History'),
++                       dict(academic_year='2025-2026'), dict(semester='2'), dict(student_id='99999')]:
++            with self.subTest(change=change):
++                payload = self.record()
++                payload.update(change)
++                before = self.snapshot()
++                self.reject(self.post('/faculty_dashboard', **payload), before)
++
++    def test_second_faculty_cannot_use_first_faculty_assignment(self):
++        self.login(5)
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'))
++
++    def test_new_record_for_assigned_module_can_be_created(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("DELETE FROM grades WHERE module_name='Math'")
++            conn.execute("DELETE FROM absences WHERE module_name='Math'")
++        self.assertEqual(self.post('/faculty_dashboard', **self.record()).status_code, 302)
++        self.assertEqual(len(self.client.get('/api/student_records/3').json['records']), 1)
++
++    def test_revoked_assignment_takes_effect_on_existing_session(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute('DELETE FROM faculty_assignments WHERE faculty_id=2')
++        before = self.snapshot()
++        self.reject(self.post('/faculty_dashboard', **self.record()), before)
++        self.reject(self.client.get('/api/student_records/3'), before)
++        self.assertNotIn(b'Math', self.client.get('/faculty_dashboard').data)
++
++    def test_cookie_role_forgery_does_not_elevate_student(self):
++        self.login(3)
++        with self.client.session_transaction() as sess:
++            sess['role'] = 'admin'
++            sess['name'] = 'Administrator'
++        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'))
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_form_and_query_role_forgery_does_not_elevate(self):
++        self.login(3)
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard?role=faculty', role='faculty', **self.record()))
++
++    def test_registration_always_creates_student(self):
++        self.client.get('/register')
++        self.assertEqual(self.post('/register?role=admin', name='New User', email='new@example.test',
++                                   password='NewPassword123!', role='faculty', user_id='1').status_code, 302)
++        with self.db() as conn:
++            self.assertEqual(conn.execute("SELECT role FROM users WHERE email='new@example.test'").fetchone(), ('student',))
++
++    def test_database_demotion_immediately_revokes_admin_session(self):
++        self.login(1)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='student' WHERE id=1")
++        self.reject_unchanged(lambda: self.post('/admin_dashboard', **self.record()))
++
++    def test_database_demotion_immediately_revokes_faculty_session(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='student' WHERE id=2")
++        self.reject_unchanged(lambda: self.post('/faculty_dashboard', **self.record()))
++
++    def test_deleted_account_loses_existing_session(self):
++        self.login(3)
++        with self.db() as conn:
++            conn.execute('DELETE FROM users WHERE id=3')
++        self.reject_unchanged(lambda: self.client.get('/api/student_records/3'), 401)
++
++    def test_unknown_database_role_fails_closed(self):
++        self.login(2)
++        with self.db() as conn:
++            conn.execute("UPDATE users SET role='unknown' WHERE id=2")
++        self.reject_unchanged(lambda: self.client.get('/faculty_dashboard'))
++        other = app.test_client()
++        other.get('/login')
++        with other.session_transaction() as sess:
++            token = sess['_csrf_token']
++        response = other.post('/login', data=dict(email='user6@example.test', password='password', csrf_token=token))
++        self.assertEqual(response.status_code, 401)
++        with other.session_transaction() as sess:
++            self.assertNotIn('user_id', sess)
++
++    def test_string_admin_session_and_hardcoded_admin_login_rejected(self):
++        self.client.get('/login')
++        response = self.post('/login', email='admin', password='admin')
++        self.assertEqual(response.status_code, 401)
++        with self.client.session_transaction() as sess:
++            sess['user_id'], sess['role'] = 'admin', 'admin'
++        self.reject_unchanged(lambda: self.client.get('/admin_dashboard'), 401)
++
++    def test_denial_audit_contains_endpoint_and_actor(self):
++        self.login(2)
++        payload = self.record()
++        payload['student_id'] = '4'
++        self.assertEqual(self.post('/faculty_dashboard', **payload).status_code, 403)
++        with self.db() as conn:
++            row = conn.execute("SELECT user_id, success, details FROM audit_logs WHERE action='UNAUTHORIZED_ACCESS'").fetchone()
++        self.assertEqual(row[:2], ('2', 0))
++        self.assertIn('POST /faculty_dashboard', row[2])
++
++    def test_authorized_faculty_still_requires_csrf(self):
++        self.login(2)
++        before = self.snapshot()
++        self.reject(self.client.post('/faculty_dashboard', data=self.record()), before, 400)
++        self.reject(self.post('/faculty_dashboard', **{**self.record(), 'csrf_token': 'wrong'}), before, 400)
++
++    def test_authorized_faculty_still_requires_valid_inputs(self):
++        self.login(2)
++        for change in [dict(grade='99'), dict(grade='nan'), dict(absences='-1'), dict(semester='3')]:
++            with self.subTest(change=change):
++                before = self.snapshot()
++                self.reject(self.post('/faculty_dashboard', **{**self.record(), **change}), before, 400)
++
++    def test_admin_normal_read_write_and_exports(self):
++        self.login(1)
++        self.assertEqual(self.post('/admin_dashboard', **self.record()).status_code, 302)
++        for path in ['/admin_dashboard', '/analytics', '/api/performance_evolution', '/api/student_risk/3',
++                     '/api/student_records/4', '/export_data?format=csv', '/export_data?format=excel', '/export_data?format=pdf']:
++            with self.subTest(path=path):
++                self.assertEqual(self.client.get(path).status_code, 200)
++
++    def test_logout_invalidates_access_and_get_logout_is_disabled(self):
++        self.login(3)
++        self.assertEqual(self.client.get('/logout').status_code, 405)
++        self.assertEqual(self.post('/logout').status_code, 302)
++        self.reject_unchanged(lambda: self.client.get('/student_dashboard'), 401)
++
++    def test_missing_student_admin_returns_404(self):
++        self.login(1)
++        self.assertEqual(self.client.get('/api/student_records/999').status_code, 404)
++        self.assertEqual(self.client.get('/api/student_risk/999').status_code, 404)
++
++    def test_additive_migration_is_idempotent(self):
++        before = self.snapshot()
++        with redirect_stdout(io.StringIO()):
++            init_db()
++            init_db()
++        self.assertEqual(self.snapshot(), before)
++
++
++if __name__ == '__main__':
++    unittest.main(verbosity=2)
