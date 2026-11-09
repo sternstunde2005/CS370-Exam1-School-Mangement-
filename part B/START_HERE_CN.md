@@ -31,7 +31,7 @@ python website/setup_demo.py
 python website/run.py
 ```
 
-3. 浏览器打开 http://127.0.0.1:5000 。终端保持开启，停止时按 Control+C。
+3. 浏览器打开 http://127.0.0.1:5001 。终端保持开启，停止时按 Control+C。
 4. 学生：`student3@example.test`；教师：`faculty2@example.test`。密码都是 `DemoPass123!`。
 5. 后续再次启动只需激活环境并执行 `python website/run.py`。不要重复创建演示数据库；脚本遇到已有数据库会拒绝覆盖。
 
