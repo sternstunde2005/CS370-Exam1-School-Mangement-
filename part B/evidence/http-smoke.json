@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "check": "HTTP anonymous dashboard",
+      "status": 401
+    },
+    {
+      "check": "HTTP incorrect password",
+      "status": 401
+    },
+    {
+      "check": "HTTP student login follows redirect to dashboard",
+      "status": 200
+    },
+    {
+      "check": "HTTP dashboard after logout",
+      "status": 401
+    },
+    {
+      "check": "HTTP faculty login follows redirect to dashboard",
+      "status": 200
+    }
+  ]
+}

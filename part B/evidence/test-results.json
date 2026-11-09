@@ -1,0 +1,452 @@
+{
+  "timestamp_utc": "2026-11-09T00:24:14.454386+00:00",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "tests_run": 52,
+  "failures": 0,
+  "errors": 0,
+  "passed": true,
+  "checks": [
+    {
+      "test": "test_authentication.AuthenticationTests.test_account_lock_survives_new_client_and_initialization",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_cookies_cache_and_audit_without_secrets",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_csrf_and_post_only_logout",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_expired_lock_allows_login",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_expired_session_is_rejected",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_incorrect_unknown_and_sql_injection_credentials",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_ip_limits_rotating_usernames",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_legacy_hash_upgraded_only_on_success",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_login_rotates_session_and_csrf",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_logout_revokes_copied_cookie",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_missing_or_oversized_login_rejected",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_old_cookie_without_server_session_rejected",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_password_change_invalidates_session",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/student_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/faculty_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/analytics')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/export_data')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/api/student_risk/1')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/api/performance_evolution')",
+      "status": "pass"
+    },
+    {
+      "test": "test_protected_resources_require_login (test_authentication.AuthenticationTests.test_protected_resources_require_login) (path='/api/student_records/1')",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_protected_resources_require_login",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_registration_argon2_and_student_role",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_salted_argon2id_storage",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_student_and_faculty_login",
+      "status": "pass"
+    },
+    {
+      "test": "test_authentication.AuthenticationTests.test_success_resets_account_failures",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_additive_migration_is_idempotent",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/analytics')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/api/performance_evolution')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/api/student_risk/3')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/api/student_records/4')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/export_data?format=csv')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/export_data?format=excel')",
+      "status": "pass"
+    },
+    {
+      "test": "test_admin_normal_read_write_and_exports (test_permissions.PermissionTests.test_admin_normal_read_write_and_exports) (path='/export_data?format=pdf')",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_admin_normal_read_write_and_exports",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/faculty_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/student_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/analytics')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/export_data')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/api/student_risk/3')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/api/student_records/3')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (path='/api/performance_evolution')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (post='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_anonymous_all_protected_resources (test_permissions.PermissionTests.test_anonymous_all_protected_resources) (post='/faculty_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_anonymous_all_protected_resources",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_authorized_faculty_still_requires_csrf",
+      "status": "pass"
+    },
+    {
+      "test": "test_authorized_faculty_still_requires_valid_inputs (test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs) (change={'grade': '99'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_authorized_faculty_still_requires_valid_inputs (test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs) (change={'grade': 'nan'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_authorized_faculty_still_requires_valid_inputs (test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs) (change={'absences': '-1'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_authorized_faculty_still_requires_valid_inputs (test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs) (change={'semester': '3'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_authorized_faculty_still_requires_valid_inputs",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_cookie_role_forgery_does_not_elevate_student",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_database_demotion_immediately_revokes_admin_session",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_database_demotion_immediately_revokes_faculty_session",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_deleted_account_loses_existing_session",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_denial_audit_contains_endpoint_and_actor",
+      "status": "pass"
+    },
+    {
+      "test": "test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) (change={'student_id': '4'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) (change={'module_name': 'Private History'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) (change={'academic_year': '2025-2026'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) (change={'semester': '2'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_each_assignment_dimension_is_enforced (test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced) (change={'student_id': '99999'})",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_each_assignment_dimension_is_enforced",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/analytics')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/api/performance_evolution')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/api/student_risk/3')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/student_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/export_data?format=csv')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/export_data?format=excel')",
+      "status": "pass"
+    },
+    {
+      "test": "test_faculty_cannot_access_admin_endpoints (test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints) (path='/export_data?format=pdf')",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_faculty_cannot_access_admin_endpoints",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_faculty_reads_only_assigned_modules",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_faculty_writes_assigned_record_and_forces_teacher_identity",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_form_and_query_role_forgery_does_not_elevate",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_local_cli_can_create_faculty_account",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_local_cli_demotion_revokes_active_session_and_assignments",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_local_cli_provisions_and_revokes_assignments",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_local_cli_rejects_student_as_faculty",
+      "status": "pass"
+    },
+    {
+      "test": "test_login_routes_by_database_role (test_permissions.PermissionTests.test_login_routes_by_database_role) (uid=1)",
+      "status": "pass"
+    },
+    {
+      "test": "test_login_routes_by_database_role (test_permissions.PermissionTests.test_login_routes_by_database_role) (uid=2)",
+      "status": "pass"
+    },
+    {
+      "test": "test_login_routes_by_database_role (test_permissions.PermissionTests.test_login_routes_by_database_role) (uid=3)",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_login_routes_by_database_role",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_logout_invalidates_access_and_get_logout_is_disabled",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_missing_student_admin_returns_404",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_new_record_for_assigned_module_can_be_created",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_registration_always_creates_student",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_revoked_assignment_takes_effect_on_existing_session",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_second_faculty_cannot_use_first_faculty_assignment",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_string_admin_session_and_hardcoded_admin_login_rejected",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/faculty_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/analytics')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/api/performance_evolution')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/export_data?format=csv')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/export_data?format=excel')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (path='/export_data?format=pdf')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (post='/admin_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_cannot_access_staff_endpoints (test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints) (post='/faculty_dashboard')",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_student_cannot_access_staff_endpoints",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_horizontal_idor_denied (test_permissions.PermissionTests.test_student_horizontal_idor_denied) (path='/api/student_records/4')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_horizontal_idor_denied (test_permissions.PermissionTests.test_student_horizontal_idor_denied) (path='/api/student_risk/4')",
+      "status": "pass"
+    },
+    {
+      "test": "test_student_horizontal_idor_denied (test_permissions.PermissionTests.test_student_horizontal_idor_denied) (path='/api/student_records/99999')",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_student_horizontal_idor_denied",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_student_reads_self_without_other_student_data",
+      "status": "pass"
+    },
+    {
+      "test": "test_permissions.PermissionTests.test_unknown_database_role_fails_closed",
+      "status": "pass"
+    },
+    {
+      "test": "test_audit_logger.TestAuditLogger.test_failed_event",
+      "status": "pass"
+    },
+    {
+      "test": "test_audit_logger.TestAuditLogger.test_successful_event",
+      "status": "pass"
+    },
+    {
+      "test": "test_audit_logger.TestAuditLogger.test_table_creation",
+      "status": "pass"
+    }
+  ],
+  "failure_details": []
+}
